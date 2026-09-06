@@ -1,0 +1,5 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.thoughts.mobile.test">
+  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35"/>
+  <application android:label="Thoughts tests"/>
+  <instrumentation android:name="app.thoughts.mobile.SmokeTest" android:targetPackage="app.thoughts.mobile" android:functionalTest="true"/>
+</manifest>

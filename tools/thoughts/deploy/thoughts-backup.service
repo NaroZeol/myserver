@@ -1,0 +1,16 @@
+[Unit]
+Description=Back up Thoughts with SQLite online backup
+
+[Service]
+Type=oneshot
+User=@USER@
+Group=@GROUP@
+WorkingDirectory=@DATA_DIR@/app
+Environment=PYTHONPATH=@DATA_DIR@/python
+Environment=THOUGHTS_DATABASE=@DATA_DIR@/thoughts.sqlite
+ExecStart=/bin/bash @DATA_DIR@/deploy/backup.sh
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@DATA_DIR@
