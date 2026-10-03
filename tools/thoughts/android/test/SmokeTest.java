@@ -110,6 +110,7 @@ public final class SmokeTest extends Instrumentation {
         for (String page : new String[] {
           "capture",
           "notes",
+          "terminal",
           "server",
           "settings",
         }) {
@@ -255,6 +256,28 @@ public final class SmokeTest extends Instrumentation {
       );
       waitForIdleSync();
       screenshot("server");
+      runOnMainSync(() -> {
+        screen.status("Feedback survives redraw");
+        screen.redraw();
+        View feedback = find(screen.getWindow().getDecorView(), "Feedback survives redraw");
+        check(feedback != null && feedback.getVisibility() == View.VISIBLE, "Redraw must not swallow feedback");
+        screen.navigate("notes");
+        EditText search = (EditText)find(screen.getWindow().getDecorView(), "搜索想法");
+        search.setText("Offline");
+        screen.navigate("settings");
+        screen.navigate("notes");
+        check("Offline".contentEquals(((EditText)find(screen.getWindow().getDecorView(), "搜索想法")).getText()), "Search must survive switching tabs");
+        screen.navigate("capture");
+        EditText editor = (EditText)find(screen.getWindow().getDecorView(), "想法内容");
+        editor.setSelection(3);
+        screen.setAutomaticSync(false);
+        check(((EditText)find(screen.getWindow().getDecorView(), "想法内容")).getSelectionStart() == 3, "Changing sync mode must preserve editor cursor");
+      });
+      Store.Entry offline = store.entries().get(0);
+      store.removeOrRestore(offline, false);
+      check("local-trash".equals(store.entries().get(0).pending), "Offline capture must be removable before first sync");
+      store.removeOrRestore(store.entries().get(0), true);
+      check("create".equals(store.entries().get(0).pending), "Restoring local trash must queue a create");
       // A local edit while the first request is in flight must survive acknowledgement.
       store.save(
         saved.note.getString("id"),
@@ -460,6 +483,7 @@ public final class SmokeTest extends Instrumentation {
     for (byte value : wrongPassword)
       check(value == 0, "Password must be cleared after a failed login");
     byte[] password = arguments.getString("ssh_password").getBytes("UTF-8");
+    byte[] terminalPassword = password.clone();
     arguments.remove("ssh_password");
     org.json.JSONObject enrollment = DeviceEnrollment.register(
       profile,
@@ -547,5 +571,6 @@ public final class SmokeTest extends Instrumentation {
       rejected = e.code == 495;
     }
     check(rejected, "Server host key mismatch must be rejected");
+    TerminalChecks.run(this, restored, terminalPassword);
   }
 }

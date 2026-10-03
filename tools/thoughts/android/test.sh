@@ -13,7 +13,7 @@ if os.environ.get('THOUGHTS_PREVIEW')=='1':
 Path('build/test/AndroidManifest.xml').write_text(s)
 PY
 "$ANDROID_BUILD_TOOLS/aapt2" link -o build/test/unsigned.apk -I "$ANDROID_JAR" --manifest build/test/AndroidManifest.xml
-javac -encoding UTF-8 -source 8 -target 8 -bootclasspath "$ANDROID_JAR:$ANDROID_BUILD_TOOLS/core-lambda-stubs.jar" -classpath build/classes:build/deps/jsch-android.jar -d build/test/classes test/SmokeTest.java
+javac -encoding UTF-8 -source 8 -target 8 -bootclasspath "$ANDROID_JAR:$ANDROID_BUILD_TOOLS/core-lambda-stubs.jar" -classpath build/classes:build/deps/jsch-android.jar -d build/test/classes test/*.java
 jar cf build/test/classes.jar -C build/test/classes .
 "$ANDROID_BUILD_TOOLS/d8" --release --min-api 26 --lib "$ANDROID_JAR" --classpath build/classes.jar --output build/test/dex build/test/classes.jar
 python3 - <<'PY'

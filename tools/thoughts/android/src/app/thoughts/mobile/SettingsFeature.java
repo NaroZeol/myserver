@@ -59,9 +59,9 @@ final class SettingsFeature extends Ui implements Feature {
         .show()
     );
     LinearLayout device = card(surface, "设备", "");
-    setting(device, "断开并清除本机记录", "", () -> host.disconnect());
+    setting(device, "清除本机记录与草稿", "", () -> host.disconnect());
     LinearLayout about = card(surface, "关于", "");
-    setting(about, "想法", "1.4.0", null);
+    setting(about, "想法", "1.5.0", null);
     setting(about, "开源许可", "", () -> showLicenses());
     space(surface, 32);
     android.widget.TextView note = text("一些想法，一点记录。", 12, MUTED);

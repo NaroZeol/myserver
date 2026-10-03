@@ -12,7 +12,7 @@ final class Sync {
     ) return "此设备未获想法同步权限，本机记录已保留";
     int conflicts = 0;
     for (Store.Entry entry : store.entries()) {
-      if (entry.pending == null) continue;
+      if (entry.pending == null || "local-trash".equals(entry.pending)) continue;
       if (entry.error != null) {
         conflicts++;
         continue;
@@ -58,7 +58,7 @@ final class Sync {
     store.merge(all);
     int pending = 0;
     for (Store.Entry entry : store.entries())
-      if (entry.pending != null) pending++;
+      if (entry.pending != null && !"local-trash".equals(entry.pending)) pending++;
     JSONObject publication = api.request("/publish", "POST", new JSONObject());
     if (conflicts > 0) return conflicts + " 条记录需要处理冲突，本地内容已保留";
     if (pending > 0) return pending + " 条待同步，点同步继续";

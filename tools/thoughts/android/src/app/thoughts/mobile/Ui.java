@@ -290,6 +290,11 @@ class Ui {
         } else if (id.equals("notes")) {
           c.drawRoundRect(5, 3, 19, 21, 2, 2, p);
           for (int y = 8; y < 18; y += 4) c.drawLine(9, y, 15, y, p);
+        } else if (id.equals("terminal")) {
+          c.drawRoundRect(2, 4, 22, 20, 2, 2, p);
+          c.drawLine(6, 9, 9, 12, p);
+          c.drawLine(9, 12, 6, 15, p);
+          c.drawLine(12, 15, 18, 15, p);
         } else if (id.equals("server")) {
           c.drawRoundRect(3, 4, 21, 11, 2, 2, p);
           c.drawRoundRect(3, 14, 21, 21, 2, 2, p);

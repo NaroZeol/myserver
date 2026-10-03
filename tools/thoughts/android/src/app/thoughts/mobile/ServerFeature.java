@@ -273,15 +273,18 @@ final class ServerFeature extends Ui implements Feature {
             user.getText().toString().trim(),
             ""
           );
-          dialog.dismiss();
           loading = true;
-          status("正在读取服务器身份…");
-          host.redraw();
+          dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+          dialog.getButton(AlertDialog.BUTTON_POSITIVE).setText("正在读取…");
+          dialog.setCancelable(false);
+          dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);
           IO.execute(() -> {
             try {
               ServerProfile inspected = SshConnection.inspect(candidate);
               String fingerprint = inspected.fingerprint();
-              runOnUiThread(() ->
+              runOnUiThread(() -> {
+                if (activity.isFinishing() || activity.isDestroyed()) return;
+                dialog.dismiss();
                 new AlertDialog.Builder(activity)
                   .setTitle("核对服务器身份")
                   .setMessage(
@@ -294,12 +297,20 @@ final class ServerFeature extends Ui implements Feature {
                   .setPositiveButton("信任并保存", (a, b) ->
                     host.configure(inspected)
                   )
-                  .show()
-              );
+                  .show();
+              });
             } catch (Exception e) {
-              runOnUiThread(() -> status(errorMessage(e)));
+              runOnUiThread(() -> address.setError(errorMessage(e)));
             } finally {
-              loading = false;
+              runOnUiThread(() -> {
+                loading = false;
+                if (dialog.isShowing()) {
+                  dialog.setCancelable(true);
+                  dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);
+                  dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);
+                  dialog.getButton(AlertDialog.BUTTON_POSITIVE).setText("校验服务器");
+                }
+              });
             }
           });
         } catch (Exception e) {

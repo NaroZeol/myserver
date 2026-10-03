@@ -16,19 +16,25 @@ import java.security.interfaces.RSAPublicKey;
 final class DeviceKey implements Identity {
 
   private static final String ALIAS = "thoughts-ssh-device-v1";
+  private final String alias;
   private final PrivateKey key;
   private final byte[] publicBlob;
 
   DeviceKey() throws Exception {
+    this(ALIAS);
+  }
+
+  DeviceKey(String alias) throws Exception {
+    this.alias = alias;
     KeyStore store = KeyStore.getInstance("AndroidKeyStore");
     store.load(null);
-    if (!store.containsAlias(ALIAS)) {
+    if (!store.containsAlias(alias)) {
       KeyPairGenerator generator = KeyPairGenerator.getInstance(
         "RSA",
         "AndroidKeyStore"
       );
       generator.initialize(
-        new KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_SIGN)
+        new KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
           .setKeySize(3072)
           .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA512)
           .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1)
@@ -36,9 +42,9 @@ final class DeviceKey implements Identity {
       );
       generator.generateKeyPair();
     }
-    key = (PrivateKey) store.getKey(ALIAS, null);
+    key = (PrivateKey) store.getKey(alias, null);
     RSAPublicKey pub = (RSAPublicKey) store
-      .getCertificate(ALIAS)
+      .getCertificate(alias)
       .getPublicKey();
     publicBlob = pack(
       "ssh-rsa".getBytes("UTF-8"),
@@ -104,7 +110,7 @@ final class DeviceKey implements Identity {
   }
 
   public String getName() {
-    return ALIAS;
+    return alias;
   }
 
   public boolean isEncrypted() {

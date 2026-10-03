@@ -9,13 +9,17 @@ import java.io.ByteArrayInputStream;
 final class SshConnection {
 
   static Session open(ServerProfile profile, byte[] password) throws Exception {
+    return open(profile, password, password == null ? new DeviceKey() : null);
+  }
+
+  static Session open(ServerProfile profile, byte[] password, com.jcraft.jsch.Identity identity) throws Exception {
     JSch ssh = new JSch();
     ssh.setKnownHosts(
       new ByteArrayInputStream(
         (profile.id + " " + profile.knownHost + "\n").getBytes("UTF-8")
       )
     );
-    if (password == null) ssh.addIdentity(new DeviceKey(), null);
+    if (password == null) ssh.addIdentity(identity, null);
     Session session = ssh.getSession(profile.user, profile.host, profile.port);
     configure(session, profile);
     session.setConfig(

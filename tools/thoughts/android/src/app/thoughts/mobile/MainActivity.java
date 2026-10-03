@@ -33,6 +33,7 @@ public final class MainActivity extends Activity implements Feature.Host {
   private String current = "capture",
     message = "本机优先 · 随时记录";
   private TextView statusView;
+  private long feedbackUntil;
   private boolean registered, remoteExport;
   private final ConnectivityManager.NetworkCallback network =
     new ConnectivityManager.NetworkCallback() {
@@ -50,6 +51,7 @@ public final class MainActivity extends Activity implements Feature.Host {
     thoughts = new ThoughtsModule(this);
     add(thoughts.screen("capture", "记录"));
     add(thoughts.screen("notes", "想法"));
+    add(new TerminalFeature(this));
     add(new ServerFeature(this));
     add(new SettingsFeature(this));
     if (state != null) {
@@ -146,7 +148,14 @@ public final class MainActivity extends Activity implements Feature.Host {
         status("更换服务器前，请先同步或导出，并在设置中清除本机记录。");
         return;
       }
+      boolean sameIdentity = api.profile != null && profile.sameEndpoint(api.profile) && profile.knownHost.equals(api.profile.knownHost);
       profile.save(this);
+      if (sameIdentity) {
+        api = new Api(profile);
+        redraw();
+        status("服务器配置已保存");
+        return;
+      }
       account.clear();
       api = new Api(profile);
       getSharedPreferences("server_status", 0).edit().clear().commit();
@@ -164,6 +173,7 @@ public final class MainActivity extends Activity implements Feature.Host {
 
   public void navigate(String id) {
     if (!features.containsKey(id)) return;
+    if (id.equals(current)) return;
     (
       (android.view.inputmethod.InputMethodManager) getSystemService(
         INPUT_METHOD_SERVICE
@@ -214,7 +224,8 @@ public final class MainActivity extends Activity implements Feature.Host {
     statusView = ui.text(message, 12, Ui.MUTED);
     statusView.setPadding(0, ui.dp(6), 0, ui.dp(6));
     statusView.setMaxLines(2);
-    statusView.setVisibility(View.GONE);
+    statusView.setVisibility(android.os.SystemClock.elapsedRealtime() < feedbackUntil ? View.VISIBLE : View.GONE);
+    expireStatus(statusView);
     statusView.setAccessibilityLiveRegion(
       View.ACCESSIBILITY_LIVE_REGION_POLITE
     );
@@ -275,7 +286,6 @@ public final class MainActivity extends Activity implements Feature.Host {
     }
     root.addView(nav);
     // Give the editor the available height while typing; navigation returns with the keyboard dismissed.
-    TextView screenStatus = statusView;
     root.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
       android.graphics.Rect visible = new android.graphics.Rect();
       root.getWindowVisibleDisplayFrame(visible);
@@ -285,7 +295,6 @@ public final class MainActivity extends Activity implements Feature.Host {
       int visibility = keyboard ? View.GONE : View.VISIBLE;
       if (nav.getVisibility() != visibility) {
         nav.setVisibility(visibility);
-        if (keyboard) screenStatus.setVisibility(View.GONE);
       }
     });
     setContentView(root);
@@ -293,12 +302,20 @@ public final class MainActivity extends Activity implements Feature.Host {
 
   public void status(String value) {
     message = value == null ? "操作未完成，请重试" : value;
+    feedbackUntil = android.os.SystemClock.elapsedRealtime() + 7000;
     if (statusView != null) {
       TextView feedback = statusView;
       feedback.setText(message);
       feedback.setVisibility(View.VISIBLE);
-      feedback.postDelayed(() -> feedback.setVisibility(View.GONE), 5000);
+      expireStatus(feedback);
     }
+  }
+
+  private void expireStatus(TextView feedback) {
+    long remaining = feedbackUntil - android.os.SystemClock.elapsedRealtime();
+    feedback.postDelayed(() -> {
+      if (feedback == statusView && android.os.SystemClock.elapsedRealtime() >= feedbackUntil) feedback.setVisibility(View.GONE);
+    }, Math.max(1, remaining));
   }
 
   public boolean automaticSync() {
@@ -427,36 +444,42 @@ public final class MainActivity extends Activity implements Feature.Host {
       return;
     }
     thoughts.saveDraft();
+    int pending = 0;
     try {
-      for (Store.Entry entry : store.entries())
-        if (entry.pending != null) {
-          status("还有未同步记录，请先同步或导出");
-          return;
-        }
-      if (
-        !getSharedPreferences("draft", 0).getString("content", "").isEmpty()
-      ) {
-        status("还有草稿，请先保存或导出");
-        return;
-      }
-    } catch (Exception e) {
-      status(ui.errorMessage(e));
-      return;
-    }
-    new AlertDialog.Builder(this)
-      .setTitle("断开这台设备？")
-      .setMessage(
-        "清除本机已同步记录，服务器内容保留。手机密钥仍然保留，可再次验证连接；如要撤销设备，请在服务器删除设备登记。"
-      )
+      for (Store.Entry entry : store.entries()) if (entry.pending != null) pending++;
+    } catch (Exception e) { status(ui.errorMessage(e)); return; }
+    boolean hasDraft = !getSharedPreferences("draft", 0).getString("content", "").isEmpty();
+    boolean hasUnsaved = pending > 0 || hasDraft;
+    LinearLayout form = ui.column();
+    form.setPadding(ui.dp(24), ui.dp(8), ui.dp(24), ui.dp(12));
+    form.addView(ui.text(
+      "清除本机记录与草稿，并退出想法同步。服务器数据、连接配置和 SSH 密钥保留。" +
+      (hasUnsaved ? "\n\n当前有 " + pending + " 条未同步记录" + (hasDraft ? "和编辑草稿" : "") + "，清除后无法从本机恢复。可先导出，再回来清除。" : ""), 14, Ui.INK));
+    CheckBox confirmed = new CheckBox(this);
+    confirmed.setText("我确认清除尚未同步的本机内容");
+    if (hasUnsaved) form.addView(confirmed);
+    AlertDialog dialog = new AlertDialog.Builder(this)
+      .setTitle("清除本机数据？")
+      .setView(form)
       .setNegativeButton("取消", null)
-      .setPositiveButton("断开", (d, w) -> {
-        account.clear();
-        store.clear();
-        getSharedPreferences("draft", 0).edit().clear().commit();
-        getSharedPreferences("server_status", 0).edit().clear().commit();
-        status("已断开，本机记录已清除");
-        redraw();
-      })
-      .show();
+      .setNeutralButton("先导出", (d,w) -> export(false))
+      .setPositiveButton("清除", (d,w) -> {
+        // Recheck after the confirmation dialog: automatic sync may have started meanwhile.
+        if (SYNCING.get()) { status("正在同步，请完成后再清除"); return; }
+        try {
+          thoughts.discardDraft();
+          store.clear();
+          account.clear();
+          getSharedPreferences("server_status", 0).edit().clear().commit();
+          features.put("server", new ServerFeature(this));
+          redraw();
+          status("本机数据已清除，服务器数据保留");
+        } catch (Exception e) { status(ui.errorMessage(e)); }
+      }).create();
+    dialog.setOnShowListener(d -> {
+      dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(!hasUnsaved);
+      confirmed.setOnCheckedChangeListener((b,checked) -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(checked));
+    });
+    dialog.show();
   }
 }
