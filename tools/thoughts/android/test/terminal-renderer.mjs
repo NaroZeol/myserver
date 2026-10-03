@@ -29,6 +29,11 @@ try {
     }, legacy);
     await page.goto('https://terminal.invalid/index.html');
     await page.waitForFunction(() => events.ready);
+    await page.waitForTimeout(100);
+    assert.equal(await page.evaluate(() => {
+      const r = document.querySelector('.xterm-screen').getBoundingClientRect();
+      return r.bottom <= innerHeight - 8 && r.right <= innerWidth - 8;
+    }), true, 'Entire terminal grid must fit inside its padding, including the last row and column');
     let serial = 0;
     const write = async text => {
       const id = ++serial;

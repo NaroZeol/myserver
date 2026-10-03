@@ -260,6 +260,17 @@ final class TerminalChecks {
           return false;
         }
       }, "The current prompt must stay visible above the keyboard, not hidden below old scrollback");
+      Thread.sleep(300);
+      check(
+        "true".equals(
+          js(
+            test,
+            surface,
+            "(()=>{const r=document.querySelector('.xterm-screen').getBoundingClientRect();return r.bottom<=innerHeight-8 && r.right<=innerWidth-8})()"
+          )
+        ),
+        "Keyboard layout must show every row/column without clipping under the key deck"
+      );
       picture = test.getUiAutomation().takeScreenshot();
       try (
         java.io.OutputStream out = new java.io.FileOutputStream(
