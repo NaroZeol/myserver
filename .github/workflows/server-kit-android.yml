@@ -1,0 +1,121 @@
+name: Server Kit Android
+on:
+  push:
+    paths:
+      - 'tools/server-kit/android/src/**'
+      - 'tools/server-kit/android/res/**'
+      - 'tools/server-kit/android/assets/**'
+      - 'tools/server-kit/android/test/**'
+      - 'tools/server-kit/android/*.sh'
+      - 'tools/server-kit/android/AndroidManifest.xml'
+      - 'tools/server-kit/modules/thoughts/server/app.py'
+      - 'tools/server-kit/modules/thoughts/server/publisher.py'
+      - 'tools/server-kit/modules/thoughts/server/ssh_gateway.py'
+      - 'tools/server-kit/modules/thoughts/server/requirements.txt'
+      - 'tools/server-kit/modules/thoughts/deploy/register-device.py'
+      - 'tools/server-kit/modules/thoughts/deploy/ssh-gateway.sh'
+      - '.github/workflows/server-kit-android.yml'
+  pull_request:
+    paths:
+      - 'tools/server-kit/android/src/**'
+      - 'tools/server-kit/android/res/**'
+      - 'tools/server-kit/android/assets/**'
+      - 'tools/server-kit/android/test/**'
+      - 'tools/server-kit/android/*.sh'
+      - 'tools/server-kit/android/AndroidManifest.xml'
+      - 'tools/server-kit/modules/thoughts/server/app.py'
+      - 'tools/server-kit/modules/thoughts/server/publisher.py'
+      - 'tools/server-kit/modules/thoughts/server/ssh_gateway.py'
+      - 'tools/server-kit/modules/thoughts/server/requirements.txt'
+      - 'tools/server-kit/modules/thoughts/deploy/register-device.py'
+      - 'tools/server-kit/modules/thoughts/deploy/ssh-gateway.sh'
+      - '.github/workflows/server-kit-android.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: server-kit-android.yml-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  android:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 35]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Terminal renderer interaction tests
+        if: matrix.api == 29
+        run: |
+          npm install --prefix "$RUNNER_TEMP/terminal-tests" --no-save playwright@1.63.0
+          "$RUNNER_TEMP/terminal-tests/node_modules/.bin/playwright" install --with-deps chromium
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/terminal-tests/node_modules/playwright/index.mjs" node tools/server-kit/android/test/terminal-renderer.mjs
+      - name: Prepare signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SERVER_KIT_KEYSTORE_BASE64 || secrets.THOUGHTS_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.SERVER_KIT_KEYSTORE_PASSWORD || secrets.THOUGHTS_KEYSTORE_PASSWORD }}
+        shell: bash
+        run: |
+          umask 077
+          if [[ -n "$KEYSTORE_BASE64" && -n "$KEYSTORE_PASSWORD" ]]; then
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/thoughts.jks"
+            printf '%s' "$KEYSTORE_PASSWORD" > "$RUNNER_TEMP/signing-password"
+            echo 'APK_KIND=release' >> "$GITHUB_ENV"
+          else
+            printf '%s' 'android-ci-only' > "$RUNNER_TEMP/signing-password"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/thoughts.jks" -storepass:file "$RUNNER_TEMP/signing-password" -alias thoughts -keyalg RSA -keysize 3072 -validity 30 -dname 'CN=Thoughts CI Preview'
+            echo 'APK_KIND=preview' >> "$GITHUB_ENV"
+            echo 'SERVER_KIT_PREVIEW=1' >> "$GITHUB_ENV"
+          fi
+      - name: Build native APK
+        env:
+          SERVER_KIT_KEYSTORE: ${{ runner.temp }}/thoughts.jks
+          SERVER_KIT_KEYSTORE_PASSWORD_FILE: ${{ runner.temp }}/signing-password
+        run: |
+          export ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar"
+          export ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          bash tools/server-kit/android/build.sh
+          bash tools/server-kit/android/check-boundaries.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-kit-android-${{ env.APK_KIND }}-api${{ matrix.api }}
+          path: tools/server-kit/android/build/server-kit.apk
+          retention-days: 14
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Prepare isolated SSH fixture
+        run: bash tools/server-kit/android/test/ssh-fixture.sh
+      - name: Native Android smoke tests
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          SERVER_KIT_KEYSTORE: ${{ runner.temp }}/thoughts.jks
+          SERVER_KIT_KEYSTORE_PASSWORD_FILE: ${{ runner.temp }}/signing-password
+          SERVER_KIT_SSH_TEST: '1'
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          disable-animations: true
+          script: ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar" ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0" bash tools/server-kit/android/test.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: server-kit-android-verification-api${{ matrix.api }}
+          path: |
+            tools/server-kit/android/build/test/screenshots/
+            tools/server-kit/android/build/test/result.txt
+            tools/server-kit/android/build/ssh-fixture/*.log
+          retention-days: 14
