@@ -27,6 +27,7 @@ final class TerminalSurface extends WebView {
   private final AtomicInteger serial = new AtomicInteger();
   private volatile boolean disposed;
   volatile boolean loaded;
+  volatile String rendererIssue = "";
   int columns = 80,
     rows = 24;
 
@@ -92,6 +93,21 @@ final class TerminalSurface extends WebView {
         }
       },
       "Phone"
+    );
+    setWebChromeClient(
+      new WebChromeClient() {
+        @Override
+        public boolean onConsoleMessage(ConsoleMessage message) {
+          if (
+            message.messageLevel() == ConsoleMessage.MessageLevel.ERROR
+          ) rendererIssue =
+            "script error at " +
+            message.sourceId() +
+            ":" +
+            message.lineNumber();
+          return true;
+        }
+      }
     );
     setWebViewClient(
       new WebViewClient() {

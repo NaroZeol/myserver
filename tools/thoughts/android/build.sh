@@ -11,8 +11,11 @@ rm -rf build/generated build/classes build/dex
 mkdir -p build/generated build/classes build/dex
 bash dependencies.sh
 python3 - <<'PY'
-import os, shutil
+import os, shutil, hashlib, json
 from pathlib import Path
+terminal = Path('assets/terminal')
+for name, digest in json.loads((terminal / 'vendor.json').read_text())['sha256'].items():
+    assert hashlib.sha256((terminal / name).read_bytes()).hexdigest() == digest, 'Terminal asset checksum mismatch: ' + name
 # Drop stale resources when switching deployment configurations.
 shutil.rmtree('build/res', ignore_errors=True)
 shutil.copytree('res', 'build/res')

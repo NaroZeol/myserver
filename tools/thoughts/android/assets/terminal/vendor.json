@@ -5,10 +5,14 @@
     "@xterm/addon-fit": "0.11.0"
   },
   "sha256": {
-    "xterm.js": "14903579ff54664cd72f8e8699e6961a6272c21863ec1c3b118cdc8af5d4a972",
+    "xterm.js": "7589ac9fcd5c0ee1e51b854dfde270d7fed2473ebdfc6330576b3a54a64ec81e",
     "xterm.css": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6",
-    "addon-fit.js": "ba3ea256ce0620a0992a197d6c9baea64823fc93d8da07a9e366ca9943c18527",
+    "addon-fit.js": "75e9d8ddfc9220281210ee13e2d18f7f0b1c065356456ed3bb2b1dd714911001",
     "XTERM-LICENSE": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd",
     "FIT-LICENSE": "e256f01188af527e4d06d21d06fbf785ae9c50d4b328bf03cbe0ba7f0aa4228f"
+  },
+  "transform": {
+    "esbuild": "0.25.12",
+    "target": "chrome74"
   }
 }

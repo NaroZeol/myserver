@@ -387,9 +387,10 @@ public final class SmokeTest extends Instrumentation {
           "Explicit sync must still upload records in manual mode"
         );
       }
+      InteractionChecks.run(this, screen);
       result.putString(
         "stream",
-        "PASS: native launch, offline capture, list rendering, draft persistence, in-flight edit preservation\n"
+        "PASS: native launch, offline capture, list rendering, draft persistence, edit/delete/restore/clear flows, feedback/search/cursor retention, in-flight edit preservation, SSH PTY and renderer\n"
       );
       finish(-1, result);
     } catch (Throwable error) {

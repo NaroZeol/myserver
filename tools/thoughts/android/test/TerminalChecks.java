@@ -125,7 +125,16 @@ final class TerminalChecks {
       );
       field.setAccessible(true);
       TerminalSurface surface = (TerminalSurface) field.get(screen);
-      await(() -> surface.loaded, "Bundled terminal renderer did not load");
+      try {
+        await(() -> surface.loaded, "Bundled terminal renderer did not load");
+      } catch (AssertionError e) {
+        throw new AssertionError(
+          surface.rendererIssue +
+            "; WebView=" +
+            js(test, surface, "navigator.userAgent"),
+          e
+        );
+      }
       test.runOnMainSync(() -> {
         check(
           !surface.getSettings().getAllowFileAccess(),
@@ -152,39 +161,57 @@ final class TerminalChecks {
       connection.setAccessible(true);
       TerminalSession active = (TerminalSession) connection.get(screen);
       await(active::isConnected, "Independent terminal key must reconnect");
+      String command = "printf '\\nUI_READY_测试\\n'\r";
       js(
         test,
         surface,
-        "TerminalUI.key(\"printf '\\\\nUI_READY_测试\\\\n'\\r\")"
+        "TerminalUI.key(" + org.json.JSONObject.quote(command) + ")"
       );
       await(() -> {
         try {
-          return js(
-            test,
-            surface,
-            "Array.from({length:terminal.buffer.active.length},(_,i)=>terminal.buffer.active.getLine(i).translateToString()).join('\\n')"
-          ).contains("UI_READY_测试");
+          return "true".equals(
+            js(
+              test,
+              surface,
+              "Array.from({length:terminal.buffer.active.length},(_,i)=>terminal.buffer.active.getLine(i).translateToString(true)).includes('UI_READY_测试')"
+            )
+          );
         } catch (Exception e) {
           return false;
         }
-      }, "Real PTY output must render including Unicode");
+      }, "Rendered Unicode result must come from command execution, not input echo");
       check(
         js(test, surface, "typeof Phone.readFile").equals("\"undefined\""),
         "No filesystem bridge"
       );
-      // Emulator survives a resize/rotation and handles alternate screen mode.
-      js(
-        test,
-        surface,
-        "terminal.resize(50,12); terminal.write('\\x1b[?1049hALT_SCREEN\\x1b[?1049l')"
-      );
+      // Resize the actual Activity: keep the same connection and let the fit addon update PTY size.
       test.runOnMainSync(() ->
-        screen.onConfigurationChanged(screen.getResources().getConfiguration())
+        screen.setRequestedOrientation(
+          android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        )
+      );
+      await(
+        () ->
+          screen.getResources().getConfiguration().orientation ==
+          android.content.res.Configuration.ORIENTATION_LANDSCAPE,
+        "Terminal must support landscape"
       );
       check(
-        active.isConnected(),
-        "Configuration change must preserve terminal session"
+        active.isConnected() && !screen.isDestroyed(),
+        "Rotation must preserve the PTY and Activity"
       );
+      test.runOnMainSync(() ->
+        screen.setRequestedOrientation(
+          android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        )
+      );
+      await(
+        () ->
+          screen.getResources().getConfiguration().orientation ==
+          android.content.res.Configuration.ORIENTATION_PORTRAIT,
+        "Terminal must return to portrait"
+      );
+      js(test, surface, "TerminalUI.font(14)");
       // Capture only synthetic CI terminal content, never production output.
       test.runOnMainSync(() ->
         screen.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE)

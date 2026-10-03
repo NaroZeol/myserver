@@ -54,16 +54,19 @@ final class TerminalAuth {
   static void register(Session session, DeviceKey key) throws Exception {
     // Fixed program, public key over stdin. Preserve unrelated keys and serialize our own registrations.
     String script =
-      "import os,sys,pathlib,fcntl,base64\n" +
+      "import os,sys,pathlib,fcntl,base64,contextlib\n" +
       "key=sys.stdin.buffer.readline(16385).decode('ascii').strip()\n" +
       "parts=key.split()\n" +
       "assert len(parts)==3 and parts[0]=='ssh-rsa' and len(key)<16384\n" +
       "base64.b64decode(parts[1],validate=True)\n" +
       "root=pathlib.Path.home()/'.ssh'\n" +
       "root.mkdir(mode=0o700,exist_ok=True)\n" +
-      "with (root/'terminal-registration.lock').open('a') as lock:\n" +
-      " os.chmod(lock.name,0o600)\n" +
-      " fcntl.flock(lock,fcntl.LOCK_EX)\n" +
+      "with contextlib.ExitStack() as stack:\n" +
+      " locks=[root/'terminal-registration.lock']\n" +
+      " devices=pathlib.Path.home()/'.local/share/thoughts/devices'\n" +
+      " if devices.is_dir(): locks.append(devices/'register.lock')\n" +
+      " for path in locks:\n" +
+      "  lock=stack.enter_context(path.open('a')); os.chmod(path,0o600); fcntl.flock(lock,fcntl.LOCK_EX)\n" +
       " p=root/'authorized_keys'\n" +
       " old=p.read_text() if p.exists() else ''\n" +
       " line='no-agent-forwarding,no-port-forwarding,no-X11-forwarding '+parts[0]+' '+parts[1]+' thoughts-terminal'\n" +

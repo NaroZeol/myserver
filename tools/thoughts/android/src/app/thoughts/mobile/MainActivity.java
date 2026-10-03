@@ -488,9 +488,11 @@ public final class MainActivity extends Activity implements Feature.Host {
     CheckBox confirmed = new CheckBox(this);
     confirmed.setText("我确认清除尚未同步的本机内容");
     if (hasUnsaved) form.addView(confirmed);
+    ScrollView scroll = new ScrollView(this);
+    scroll.addView(form);
     AlertDialog dialog = new AlertDialog.Builder(this)
       .setTitle("清除本机数据？")
-      .setView(form)
+      .setView(scroll)
       .setNegativeButton("取消", null)
       .setNeutralButton("先导出", (d, w) -> export(false))
       .setPositiveButton("清除", (d, w) -> {
