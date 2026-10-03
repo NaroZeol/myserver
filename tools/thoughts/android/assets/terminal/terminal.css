@@ -2,3 +2,7 @@ html,body { height:100%; margin:0; background:#1c1d20; overflow:hidden; }
 #terminal { height:100%; padding:8px; box-sizing:border-box; }
 .xterm { height:100%; }
 .xterm .xterm-viewport { overscroll-behavior:contain; }
+.terminal-handle { display:none; position:fixed; width:32px; height:32px; z-index:5; touch-action:none; }
+.terminal-handle::after { content:''; display:block; margin:4px 6px; width:20px; height:20px; border-radius:50%; background:#d8af8c; box-shadow:0 1px 5px #0008; }
+.terminal-bottom { position:fixed; right:14px; bottom:12px; padding:10px 14px; border:1px solid #5e554c; border-radius:20px; background:#302c28; color:#e8d6c5; font-size:12px; }
+.terminal-bottom[hidden] { display:none; }

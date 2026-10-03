@@ -18,7 +18,9 @@ final class TerminalSurface extends WebView {
     void ready();
     void input(byte[] bytes);
     void resize(int cols, int rows);
-    void controlReleased();
+    void modifiersChanged(int control, int alt);
+    void selectionChanged(boolean selected);
+    void fontStep(int step);
     void failed();
   }
 
@@ -38,6 +40,7 @@ final class TerminalSurface extends WebView {
     setContentDescription("交互式 SSH 终端");
     setImportantForAutofill(IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
     setSaveEnabled(false);
+    setOnLongClickListener(view -> true);
     WebSettings settings = getSettings();
     settings.setJavaScriptEnabled(true);
     settings.setAllowFileAccess(false);
@@ -86,9 +89,23 @@ final class TerminalSurface extends WebView {
         }
 
         @JavascriptInterface
-        public void controlReleased() {
+        public void modifiersChanged(int control, int alt) {
           post(() -> {
-            if (!disposed) listener.controlReleased();
+            if (!disposed) listener.modifiersChanged(control, alt);
+          });
+        }
+
+        @JavascriptInterface
+        public void selectionChanged(boolean selected) {
+          post(() -> {
+            if (!disposed) listener.selectionChanged(selected);
+          });
+        }
+
+        @JavascriptInterface
+        public void fontStep(int step) {
+          post(() -> {
+            if (!disposed && Math.abs(step) == 1) listener.fontStep(step);
           });
         }
       },
@@ -137,7 +154,7 @@ final class TerminalSurface extends WebView {
             "GET".equals(request.getMethod()) &&
             path != null &&
             path.matches(
-              "/(index\\.html|xterm\\.js|xterm\\.css|addon-fit\\.js|terminal\\.js|compat\\.js|terminal\\.css)"
+              "/(index\\.html|xterm\\.js|xterm\\.css|addon-fit\\.js|terminal\\.js|touch\\.js|compat\\.js|terminal\\.css)"
             )
           ) {
             try {

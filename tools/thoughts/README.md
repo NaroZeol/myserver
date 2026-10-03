@@ -18,7 +18,9 @@ App 不预置任何服务器、用户名、主机公钥或 Gist ID。首次在�
 
 - 默认输入密码登录本次会话，密码不保存。可以明确勾选「记住此设备」：通过密码登录在 `authorized_keys` 追加独立终端密钥，然后验证密钥登录。自动登记需要服务器 Python 3。
 - 终端密钥按服务器地址、账户、端口和主机公钥隔离，私钥留在 Android Keystore；不会复用或放宽想法 RPC 密钥。终端拥有登录账户的命令执行权限，禁用 agent、端口与 X11 转发。撤销终端授权需删除服务器 `authorized_keys` 中对应 `thoughts-terminal` 条目；想法设备撤销不影响独立的终端授权。
-- 返回时确认关闭会话；旋转屏幕保持连接。当前为单会话，不提供后台保活或进程恢复。长任务建议在服务器的 tmux/screen 中运行，Android 终止 App 或网络断开后需重连。
+- 扩展键在竖屏采用固定两行布局，方向键呈倒 T 排列；横屏收为一行，保留全部按键。Ctrl / Alt 点击作用于下一个键，长按锁定（下划线提示）、再点解除；方向键与翻页键长按连发，长按减号输入管道符。按住音量下键可作为 Ctrl，可在终端菜单关闭。
+- 双指缩放调整字号（10–24），长按文字选词、拖动选区手柄、顶部复制；菜单提供选择当前屏幕与全选。键盘按钮可打开或收起，浏览历史输出时保持滚动位置，点击「回到底部」返回提示符。粘贴保留 bracketed paste，多行或控制字符仍需确认。
+- 返回时先取消选区或收起键盘，再确认关闭会话；旋转屏幕保持连接。当前为单会话，不提供后台保活或进程恢复。长任务建议在服务器的 tmux/screen 中运行，Android 终止 App 或网络断开后需重连。
 - 渲染使用随 APK 打包的 xterm.js 6.0.0 与 fit 0.11.0，没有运行时 CDN、网页服务器或 WebSocket。WebView 只读取白名单内置资源，禁用文件访问、外部页面、网络请求和远程剪贴板控制；输入输出只通过本地桥接与 SSH 传输。终端内容不写日志，不保存到磁盘，最近任务缩略图受保护。
 - 输出采用有界缓冲与渲染确认，输入队列有上限，避免大量输出阻塞想法同步。依赖来源与文件摘要在 `android/assets/terminal/vendor.json`，许可证在同目录和 App「开源许可」。内置脚本已转换为 Chrome 74 兼容语法；维护时使用 `android/vendor-terminal.sh` 重新生成并验证摘要，日常构建不需要 Node.js。
 
@@ -59,7 +61,7 @@ python3 ~/.local/share/thoughts/deploy/register-device.py revoke --id DEVICE_ID
 
 ## Android 构建与发布
 
-包名为 `app.thoughts.mobile`，Android 8.0+，当前版本 1.5.0。安装后自行配置服务器，无需针对部署环境重新编译。当前只配置一个活动服务器；更换目标前需清理已同步本机缓存，未同步记录和草稿会阻止误切换，首次配置会保留先前离线记录。
+包名为 `app.thoughts.mobile`，Android 8.0+，当前版本 1.6.0。安装后自行配置服务器，无需针对部署环境重新编译。当前只配置一个活动服务器；更换目标前需清理已同步本机缓存，未同步记录和草稿会阻止误切换，首次配置会保留先前离线记录。
 
 使用 JDK 17、Android platform 35、build-tools 35.0.0，不需要 Gradle：
 
@@ -87,6 +89,8 @@ python3 -m venv .venv
 .venv/bin/python -m pytest tools/thoughts/server/tests -q
 ```
 
-Android 10 / 15 模拟器覆盖设备签名、服务器身份核验、密码登记、错误密码拒绝、受限 SSH CRUD、离线草稿及同步冲突保护，终端测试还覆盖独立密钥登记、真实 PTY、窗口尺寸、Ctrl+C、Unicode 渲染、退出和断开；并保留普通屏幕、窄屏放大字体和键盘状态截图。测试只使用临时 CI 服务与随机密码，不连接生产环境或写 Gist。
+Android 10 / 15 模拟器覆盖设备签名、服务器身份核验、密码登记、错误密码拒绝、受限 SSH CRUD、离线草稿及同步冲突保护，终端测试还覆盖独立密钥登记、真实 PTY、窗口尺寸、Ctrl+C、Unicode 渲染、退出和断开；扩展键单次/锁定、方向键连发取消、原生长按选择复制、键盘收起也由模拟器验证。渲染交互测试覆盖 Ctrl/Alt 编码、应用光标模式、粘贴、协议回复、双指缩放与历史滚动；并保留普通屏幕、窄屏放大字体和键盘状态截图。测试只使用临时 CI 服务与随机密码，不连接生产环境或写 Gist。
 
 本地 Web 管理可用 `THOUGHTS_DEV=1 THOUGHTS_ORIGIN=http://127.0.0.1:8765` 启动 Gunicorn；开发时将 `THOUGHTS_DATABASE` 指向测试数据库。恢复备份前停止 API 和发布定时器，另存数据库及 WAL，恢复服务用户所有权和 `0600` 权限，再启动服务。
+
+终端交互参考 [Termux 扩展键布局](https://github.com/termux/termux-app/blob/master/termux-shared/src/main/java/com/termux/shared/termux/settings/properties/TermuxPropertyConstants.java) 和 [触摸/按键交互](https://github.com/termux/termux-app/blob/master/app/src/main/java/com/termux/app/terminal/TermuxTerminalViewClient.java)，结合现有 SSH 与 xterm 渲染实现，不包含 Termux 本地运行环境。

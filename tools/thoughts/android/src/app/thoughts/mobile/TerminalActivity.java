@@ -5,8 +5,11 @@ import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.os.Bundle;
 import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.View;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
@@ -23,8 +26,10 @@ public final class TerminalActivity extends Activity {
   private TerminalSurface terminal;
   private volatile TerminalSession connection;
   private TextView feedback, placeholder;
-  private Button connect, control;
-  private boolean busy, ctrl;
+  private Button connect, keyboardButton;
+  private LinearLayout header, selectionHeader;
+  private TerminalKeys keys;
+  private boolean busy, selecting;
   private int fontSize;
 
   public void onCreate(Bundle state) {
@@ -52,7 +57,7 @@ public final class TerminalActivity extends Activity {
       );
       return insets;
     });
-    LinearLayout header = new LinearLayout(this);
+    header = new LinearLayout(this);
     header.setGravity(Gravity.CENTER_VERTICAL);
     header.addView(button("返回", () -> onBackPressed()));
     TextView name = text(profile.name, 15, FOREGROUND);
@@ -64,9 +69,30 @@ public final class TerminalActivity extends Activity {
       else login(false);
     });
     connect.setEnabled(false);
+    keyboardButton = button("键盘", () -> toggleKeyboard());
+    header.addView(keyboardButton);
     header.addView(connect);
     header.addView(button("更多", () -> menu()));
-    root.addView(header);
+    FrameLayout top = new FrameLayout(this);
+    top.addView(header, new FrameLayout.LayoutParams(-1, dp(48)));
+    selectionHeader = new LinearLayout(this);
+    selectionHeader.setGravity(Gravity.CENTER_VERTICAL);
+    TextView selectionLabel = text("选择文字", 14, FOREGROUND);
+    selectionLabel.setPadding(dp(12), 0, 0, 0);
+    selectionHeader.addView(
+      selectionLabel,
+      new LinearLayout.LayoutParams(0, -2, 1)
+    );
+    selectionHeader.addView(button("复制", () -> copySelection()));
+    selectionHeader.addView(
+      button("全选", () -> terminal.call("selectAll", ""))
+    );
+    selectionHeader.addView(
+      button("取消", () -> terminal.call("clearSelection", ""))
+    );
+    selectionHeader.setVisibility(View.GONE);
+    top.addView(selectionHeader, new FrameLayout.LayoutParams(-1, dp(48)));
+    root.addView(top, new LinearLayout.LayoutParams(-1, dp(48)));
     feedback = text("正在准备终端…", 12, MUTED);
     feedback.setPadding(dp(12), dp(4), dp(12), dp(10));
     feedback.setAccessibilityLiveRegion(
@@ -100,9 +126,21 @@ public final class TerminalActivity extends Activity {
           if (active != null) active.resize(cols, rows);
         }
 
-        public void controlReleased() {
-          ctrl = false;
-          updateControl();
+        public void modifiersChanged(int control, int alt) {
+          keys.modifiers(control, alt);
+        }
+
+        public void selectionChanged(boolean selected) {
+          selecting = selected;
+          header.setVisibility(selected ? View.GONE : View.VISIBLE);
+          selectionHeader.setVisibility(selected ? View.VISIBLE : View.GONE);
+          if (selected) terminal.performHapticFeedback(
+            android.view.HapticFeedbackConstants.LONG_PRESS
+          );
+        }
+
+        public void fontStep(int step) {
+          setFont(fontSize + step);
         }
 
         public void failed() {
@@ -125,28 +163,31 @@ public final class TerminalActivity extends Activity {
     placeholder.setPadding(dp(24), dp(24), dp(24), dp(24));
     frame.addView(placeholder, new FrameLayout.LayoutParams(-1, -1));
     root.addView(frame, new LinearLayout.LayoutParams(-1, 0, 1));
-    HorizontalScrollView keys = new HorizontalScrollView(this);
-    keys.setHorizontalScrollBarEnabled(false);
-    LinearLayout row = new LinearLayout(this);
-    row.addView(button("键盘", () -> keyboard()));
-    row.addView(button("Esc", () -> key("\u001b")));
-    row.addView(button("Tab", () -> key("\t")));
-    control = button("Ctrl", () -> {
-      ctrl = !ctrl;
-      updateControl();
-      terminal.evaluateJavascript("TerminalUI.control(" + ctrl + ")", null);
-      keyboard();
-    });
-    row.addView(control);
-    row.addView(button("^C", () -> key("\u0003")));
-    row.addView(button("↑", () -> key("\u001b[A")));
-    row.addView(button("↓", () -> key("\u001b[B")));
-    row.addView(button("←", () -> key("\u001b[D")));
-    row.addView(button("→", () -> key("\u001b[C")));
-    row.addView(button("粘贴", () -> paste()));
-    row.addView(button("Enter", () -> key("\r")));
-    keys.addView(row);
+    keys = new TerminalKeys(
+      this,
+      new TerminalKeys.Actions() {
+        public void key(String name) {
+          if (connection != null && connection.isConnected()) terminal.call(
+            "special",
+            name
+          );
+          else feedback.setText("请先连接服务器");
+        }
+
+        public void modifier(String name, boolean lock) {
+          if (terminal.loaded) terminal.evaluateJavascript(
+            "TerminalUI.modifier(" + JSONObject.quote(name) + "," + lock + ")",
+            null
+          );
+        }
+      }
+    );
     root.addView(keys);
+    root.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+      boolean visible = keyboardVisible();
+      keyboardButton.setText(visible ? "收起" : "键盘");
+      keyboardButton.setContentDescription(visible ? "收起键盘" : "显示键盘");
+    });
     setContentView(root);
   }
 
@@ -178,23 +219,77 @@ public final class TerminalActivity extends Activity {
     return b;
   }
 
-  private void updateControl() {
-    control.setTextColor(ctrl ? 0xffe6b68c : FOREGROUND);
-    control.setSelected(ctrl);
+  private boolean keyboardVisible() {
+    if (
+      android.os.Build.VERSION.SDK_INT >= 30 &&
+      terminal.getRootWindowInsets() != null
+    ) return terminal
+      .getRootWindowInsets()
+      .isVisible(android.view.WindowInsets.Type.ime());
+    Rect visible = new Rect();
+    getWindow().getDecorView().getWindowVisibleDisplayFrame(visible);
+    return (
+      getWindow().getDecorView().getRootView().getHeight() - visible.bottom >
+      dp(120)
+    );
   }
 
-  private void key(String value) {
-    if (busy) terminal.call("key", value);
-  }
-
-  private void keyboard() {
+  private void toggleKeyboard() {
     if (!terminal.loaded) return;
-    terminal.requestFocus();
-    terminal.evaluateJavascript("TerminalUI.focus()", result -> {
-      if (!isDestroyed()) (
-        (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)
-      ).showSoftInput(terminal, InputMethodManager.SHOW_IMPLICIT);
-    });
+    InputMethodManager ime = (InputMethodManager) getSystemService(
+      INPUT_METHOD_SERVICE
+    );
+    if (keyboardVisible()) {
+      ime.hideSoftInputFromWindow(terminal.getWindowToken(), 0);
+    } else {
+      terminal.requestFocus();
+      terminal.evaluateJavascript("TerminalUI.focus()", result -> {
+        if (!isDestroyed()) ime.showSoftInput(
+          terminal,
+          InputMethodManager.SHOW_IMPLICIT
+        );
+      });
+    }
+  }
+
+  private void setFont(int size) {
+    fontSize = Math.max(10, Math.min(24, size));
+    getSharedPreferences("terminal_ui", 0)
+      .edit()
+      .putInt("font", fontSize)
+      .apply();
+    terminal.evaluateJavascript("TerminalUI.font(" + fontSize + ")", null);
+  }
+
+  @Override
+  public boolean dispatchKeyEvent(KeyEvent event) {
+    if (
+      event.getKeyCode() == KeyEvent.KEYCODE_VOLUME_DOWN &&
+      terminal != null &&
+      terminal.loaded &&
+      getSharedPreferences("terminal_ui", 0).getBoolean("volume_ctrl", true) &&
+      (event.getDevice() == null ||
+        event.getDevice().getKeyboardType() !=
+          android.view.InputDevice.KEYBOARD_TYPE_ALPHABETIC)
+    ) {
+      terminal.evaluateJavascript(
+        "TerminalUI.volumeControl(" +
+          (event.getAction() == KeyEvent.ACTION_DOWN) +
+          ")",
+        null
+      );
+      return true;
+    }
+    return super.dispatchKeyEvent(event);
+  }
+
+  @Override
+  public void onWindowFocusChanged(boolean focused) {
+    super.onWindowFocusChanged(focused);
+    if (!focused && terminal != null && terminal.loaded) {
+      terminal.evaluateJavascript("TerminalUI.volumeControl(false)", null);
+      if (keys != null) keys.stopRepeating();
+    }
   }
 
   private void login(boolean forcePassword) {
@@ -274,6 +369,7 @@ public final class TerminalActivity extends Activity {
       if (password != null) java.util.Arrays.fill(password, (byte) 0);
       return;
     }
+    terminal.call("newSession", "");
     busy = true;
     connect.setText("取消");
     feedback.setText(
@@ -306,11 +402,10 @@ public final class TerminalActivity extends Activity {
           runOnUiThread(() -> {
             if (isDestroyed() || connection != started[0]) return;
             busy = false;
-            ctrl = false;
-            updateControl();
+            keys.stopRepeating();
             connect.setText("重连");
             feedback.setText(reason);
-            terminal.evaluateJavascript("TerminalUI.control(false)", null);
+            terminal.evaluateJavascript("TerminalUI.resetModifiers()", null);
           });
         }
       }
@@ -344,6 +439,14 @@ public final class TerminalActivity extends Activity {
   }
 
   public void onBackPressed() {
+    if (selecting) {
+      terminal.call("clearSelection", "");
+      return;
+    }
+    if (keyboardVisible()) {
+      toggleKeyboard();
+      return;
+    }
     if (!busy || connection == null || !connection.isConnected()) {
       disconnect();
       super.onBackPressed();
@@ -358,6 +461,17 @@ public final class TerminalActivity extends Activity {
         finish();
       })
       .show();
+  }
+
+  @Override
+  public void onConfigurationChanged(
+    android.content.res.Configuration configuration
+  ) {
+    super.onConfigurationChanged(configuration);
+    keys.layoutKeys(
+      configuration.orientation ==
+        android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    );
   }
 
   protected void onDestroy() {
@@ -403,61 +517,80 @@ public final class TerminalActivity extends Activity {
     else terminal.call("paste", value);
   }
 
+  private void copySelection() {
+    terminal.evaluateJavascript("TerminalUI.selection()", result -> {
+      try {
+        String value = new org.json.JSONArray("[" + result + "]").getString(0);
+        if (value.isEmpty()) {
+          feedback.setText("长按终端文字开始选择");
+          return;
+        }
+        ((ClipboardManager) getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(
+          ClipData.newPlainText("终端", value)
+        );
+        terminal.call("clearSelection", "");
+        android.widget.Toast.makeText(
+          this,
+          "已复制",
+          android.widget.Toast.LENGTH_SHORT
+        ).show();
+      } catch (Exception ignored) {}
+    });
+  }
+
   private void menu() {
+    boolean volume = getSharedPreferences("terminal_ui", 0).getBoolean(
+      "volume_ctrl",
+      true
+    );
     new AlertDialog.Builder(this)
       .setTitle("终端选项")
       .setItems(
         new String[] {
           "粘贴",
-          "复制选中内容",
+          "选择文字",
           "字号",
           "清除屏幕滚动记录",
           "使用密码重新连接",
+          volume ? "关闭音量下键 Ctrl" : "启用音量下键 Ctrl",
+          "操作说明",
         },
         (d, index) -> {
           if (index == 0) paste();
-          if (index == 1) terminal.evaluateJavascript(
-            "TerminalUI.selection()",
-            result -> {
-              try {
-                String value = new org.json.JSONArray(
-                  "[" + result + "]"
-                ).getString(0);
-                if (value.isEmpty()) {
-                  feedback.setText("请先在终端中选择文字");
-                  return;
-                }
-                (
-                  (ClipboardManager) getSystemService(CLIPBOARD_SERVICE)
-                ).setPrimaryClip(ClipData.newPlainText("终端", value));
-              } catch (Exception ignored) {}
-            }
-          );
+          if (index == 1) terminal.call("selectVisible", "");
           if (index == 2) new AlertDialog.Builder(this)
-            .setTitle("终端字号")
+            .setTitle("终端字号 · 也可双指缩放")
             .setSingleChoiceItems(
-              new String[] { "小 · 12", "标准 · 14", "大 · 16", "更大 · 18" },
-              Math.max(0, Math.min(3, (fontSize - 12) / 2)),
+              new String[] { "10", "12", "14", "16", "18", "20", "22", "24" },
+              fontSize % 2 == 0 ? (fontSize - 10) / 2 : -1,
               (a, n) -> {
-                fontSize = 12 + n * 2;
-                getSharedPreferences("terminal_ui", 0)
-                  .edit()
-                  .putInt("font", fontSize)
-                  .apply();
-                terminal.evaluateJavascript(
-                  "TerminalUI.font(" + fontSize + ")",
-                  null
-                );
+                setFont(10 + n * 2);
                 a.dismiss();
               }
             )
             .show();
           if (index == 3) terminal.call("clear", "");
           if (index == 4) {
-            if (busy) {
-              feedback.setText("请先断开当前会话");
-            } else login(true);
+            if (busy) feedback.setText("请先断开当前会话");
+            else login(true);
           }
+          if (index == 5) {
+            getSharedPreferences("terminal_ui", 0)
+              .edit()
+              .putBoolean("volume_ctrl", !volume)
+              .apply();
+            terminal.evaluateJavascript(
+              "TerminalUI.volumeControl(false)",
+              null
+            );
+          }
+          if (index == 6) new AlertDialog.Builder(this)
+            .setTitle("终端操作")
+            .setMessage(
+              "Ctrl / Alt：点击用于下一个按键，长按锁定，再点解除。Ctrl 后按 C 可中断命令。\n\n方向键与翻页键：长按连发。长按 − 输入 |。\n\n音量下键：按住时作为 Ctrl，可在终端选项中关闭。\n\n双指缩放：调整字号。长按文字后拖动两个选区手柄，点击顶部复制；也可通过菜单选择文字。\n\n上滑浏览输出，点击「回到底部」回到提示符。返回时先取消选择或收起键盘，再确认关闭会话。"
+            )
+            .setPositiveButton("知道了", null)
+            .show();
         }
       )
       .show();

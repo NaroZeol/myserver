@@ -269,6 +269,7 @@ final class TerminalChecks {
         picture.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out);
       }
       picture.recycle();
+      TerminalInteractionChecks.run(test, screen, surface, originalRows);
       test.runOnMainSync(() -> screen.disconnect());
       await(() -> !active.isConnected(), "Disconnect must close PTY");
       check(
