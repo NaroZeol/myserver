@@ -137,7 +137,7 @@ final class TerminalSurface extends WebView {
             "GET".equals(request.getMethod()) &&
             path != null &&
             path.matches(
-              "/(index\\.html|xterm\\.js|xterm\\.css|addon-fit\\.js|terminal\\.js|terminal\\.css)"
+              "/(index\\.html|xterm\\.js|xterm\\.css|addon-fit\\.js|terminal\\.js|compat\\.js|terminal\\.css)"
             )
           ) {
             try {
