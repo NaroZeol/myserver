@@ -138,9 +138,6 @@ public final class SshConnection {
         ? "密码不正确，或服务器未开启密码登录。"
         : "设备尚未登记或已被撤销，请重新连接服务器。"
     );
-    return new ConnectionFailure(
-      503,
-      "SSH 连接失败，请检查网络和服务器状态。本机记录已保留。"
-    );
+    return new ConnectionFailure(503, "SSH 连接失败，请检查网络和服务器状态。");
   }
 }

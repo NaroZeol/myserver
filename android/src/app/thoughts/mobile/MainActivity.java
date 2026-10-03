@@ -14,11 +14,10 @@ import android.widget.*;
 import app.thoughts.mobile.core.Feature;
 import app.thoughts.mobile.core.Ui;
 import app.thoughts.mobile.core.connection.ConnectionFailure;
+import app.thoughts.mobile.core.connection.DeviceAccount;
+import app.thoughts.mobile.core.connection.ServerApi;
 import app.thoughts.mobile.core.connection.ServerProfile;
 import app.thoughts.mobile.modules.server.ServerFeature;
-import app.thoughts.mobile.modules.terminal.TerminalFeature;
-import app.thoughts.mobile.modules.thoughts.Account;
-import app.thoughts.mobile.modules.thoughts.Api;
 import app.thoughts.mobile.modules.thoughts.Store;
 import app.thoughts.mobile.modules.thoughts.Sync;
 import app.thoughts.mobile.modules.thoughts.ThoughtsHost;
@@ -38,16 +37,16 @@ public final class MainActivity extends Activity implements ThoughtsHost {
   private static final AtomicBoolean SYNCING = new AtomicBoolean(false);
   private final LinkedHashMap<String, Feature> features = new LinkedHashMap<>();
   private Store store;
-  private Account account;
-  private Api api;
+  private DeviceAccount account;
+  private ServerApi api;
   private ThoughtsModule thoughts;
   private Ui ui;
   private Feature active;
-  private String current = "capture",
-    message = "本机优先 · 随时记录";
+  private String current = "server",
+    message = "";
   private TextView statusView;
   private long feedbackUntil;
-  private boolean registered, remoteExport;
+  private boolean registered, remoteExport, foreground;
   private final ConnectivityManager.NetworkCallback network =
     new ConnectivityManager.NetworkCallback() {
       public void onAvailable(Network value) {
@@ -58,17 +57,19 @@ public final class MainActivity extends Activity implements ThoughtsHost {
   public void onCreate(Bundle state) {
     super.onCreate(state);
     store = new Store(this);
-    account = new Account(this);
-    api = new Api(ServerProfile.load(this));
+    account = new DeviceAccount(this);
+    api = new ServerApi(ServerProfile.load(this));
     ui = new Ui(this);
     thoughts = new ThoughtsModule(this);
-    add(thoughts.screen("capture", "记录"));
-    add(thoughts.screen("notes", "想法"));
-    add(new TerminalFeature(this));
     add(new ServerFeature(this));
+    add(thoughts.screen());
     add(new SettingsFeature(this));
     if (state != null) {
-      current = state.getString("feature", "capture");
+      current = state.getString("feature", "server");
+      boolean oldEditor = current.equals("capture");
+      if (oldEditor || current.equals("notes")) current = "thoughts";
+      if (!features.containsKey(current)) current = "server";
+      thoughts.page(state.getBoolean("thoughts_editor", oldEditor));
       remoteExport = state.getBoolean("remote_export");
     }
     redraw();
@@ -92,11 +93,14 @@ public final class MainActivity extends Activity implements ThoughtsHost {
     thoughts.saveDraft();
     state.putString("feature", current);
     state.putBoolean("remote_export", remoteExport);
+    state.putBoolean("thoughts_editor", thoughts.isComposing());
     super.onSaveInstanceState(state);
   }
 
   protected void onResume() {
     super.onResume();
+    foreground = true;
+    if (active != null) active.resume();
     try {
       (
         (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE)
@@ -107,6 +111,8 @@ public final class MainActivity extends Activity implements ThoughtsHost {
   }
 
   protected void onPause() {
+    foreground = false;
+    if (active != null) active.pause();
     thoughts.saveDraft();
     if (registered) {
       try {
@@ -134,7 +140,7 @@ public final class MainActivity extends Activity implements ThoughtsHost {
     return store;
   }
 
-  public Account account() {
+  public DeviceAccount account() {
     return account;
   }
 
@@ -146,7 +152,7 @@ public final class MainActivity extends Activity implements ThoughtsHost {
     return api.profile;
   }
 
-  public Api api() {
+  public ServerApi api() {
     return api;
   }
 
@@ -172,13 +178,13 @@ public final class MainActivity extends Activity implements ThoughtsHost {
         profile.knownHost.equals(api.profile.knownHost);
       profile.save(this);
       if (sameIdentity) {
-        api = new Api(profile);
+        api = new ServerApi(profile);
         redraw();
         status("服务器配置已保存");
         return;
       }
       account.clear();
-      api = new Api(profile);
+      api = new ServerApi(profile);
       getSharedPreferences("server_status", 0).edit().clear().commit();
       features.put("server", new ServerFeature(this));
       status("服务器配置已保存");
@@ -193,8 +199,22 @@ public final class MainActivity extends Activity implements ThoughtsHost {
   }
 
   public void navigate(String id) {
+    boolean editorRoute = id.equals("capture") || id.equals("notes");
+    if (editorRoute) {
+      thoughts.page(id.equals("capture"));
+      id = "thoughts";
+    }
+    if (id.equals("terminal")) {
+      startActivity(
+        new Intent(
+          this,
+          app.thoughts.mobile.modules.terminal.TerminalActivity.class
+        )
+      );
+      return;
+    }
     if (!features.containsKey(id)) return;
-    if (id.equals(current)) return;
+    if (id.equals(current) && !editorRoute) return;
     (
       (android.view.inputmethod.InputMethodManager) getSystemService(
         INPUT_METHOD_SERVICE
@@ -206,8 +226,13 @@ public final class MainActivity extends Activity implements ThoughtsHost {
   }
 
   public void redraw() {
-    if (active != null) active.leave();
-    active = features.get(current);
+    Feature next = features.get(current);
+    if (active != null) {
+      if (active != next) active.pause();
+      active.leave();
+    }
+    boolean changed = active != next;
+    active = next;
     LinearLayout root = ui.column();
     root.setBackgroundColor(Ui.PAPER);
     root.setPadding(ui.dp(24), ui.dp(12), ui.dp(24), ui.dp(8));
@@ -222,6 +247,9 @@ public final class MainActivity extends Activity implements ThoughtsHost {
     });
     LinearLayout header = new LinearLayout(this);
     header.setGravity(Gravity.CENTER_VERTICAL);
+    if (active.hasBack()) header.addView(
+      ui.button("返回", () -> active.back(), false)
+    );
     TextView brand = ui.text(active.title(), 22, Ui.INK);
     brand.setGravity(Gravity.CENTER_VERTICAL);
     brand.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
@@ -324,6 +352,20 @@ public final class MainActivity extends Activity implements ThoughtsHost {
       }
     });
     setContentView(root);
+    if (changed && foreground) active.resume();
+  }
+
+  public void authorizationChanged() {
+    autoSync();
+  }
+
+  public void renderFeatureSettings(LinearLayout surface) {
+    for (Feature feature : features.values()) feature.renderSettings(surface);
+  }
+
+  public void onBackPressed() {
+    if (active != null && active.hasBack()) active.back();
+    else super.onBackPressed();
   }
 
   public void status(String value) {
@@ -380,7 +422,7 @@ public final class MainActivity extends Activity implements ThoughtsHost {
   public void sync() {
     if (!account.isVerified()) return;
     if (!SYNCING.compareAndSet(false, true)) return;
-    status("正在同步 · 本机记录已保留");
+    if (current.equals("thoughts")) status("正在同步 · 本机记录已保留");
     IO.execute(() -> {
       String result;
       try {
@@ -393,10 +435,10 @@ public final class MainActivity extends Activity implements ThoughtsHost {
       } finally {
         SYNCING.set(false);
       }
-      account.recordSync(result);
+      app.thoughts.mobile.modules.thoughts.ThoughtsSyncLog.record(this, result);
       String value = result;
       runOnUiThread(() -> {
-        if (!isDestroyed()) {
+        if (!isDestroyed() && current.equals("thoughts")) {
           status(value);
           active.refresh();
         }
@@ -495,7 +537,7 @@ public final class MainActivity extends Activity implements ThoughtsHost {
     form.setPadding(ui.dp(24), ui.dp(8), ui.dp(24), ui.dp(12));
     form.addView(
       ui.text(
-        "清除本机记录与草稿，并退出想法同步。服务器数据、连接配置和 SSH 密钥保留。" +
+        "清除本机想法与草稿，并关闭想法自动同步。服务器连接、授权和数据保留；手动同步可重新拉取想法。" +
           (hasUnsaved
             ? "\n\n当前有 " +
               pending +
@@ -526,9 +568,10 @@ public final class MainActivity extends Activity implements ThoughtsHost {
         try {
           thoughts.discardDraft();
           store.clear();
-          account.clear();
-          getSharedPreferences("server_status", 0).edit().clear().commit();
-          features.put("server", new ServerFeature(this));
+          getSharedPreferences("sync_settings", 0)
+            .edit()
+            .putBoolean("automatic", false)
+            .commit();
           redraw();
           status("本机数据已清除，服务器数据保留");
         } catch (Exception e) {

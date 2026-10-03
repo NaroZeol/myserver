@@ -23,7 +23,8 @@ public final class ThoughtsModule extends ThoughtsUi {
     filter = "all",
     query = "";
   private int editingVersion = 0;
-  private boolean restoring = false;
+  private boolean restoring = false,
+    composing = false;
   private final Handler handler = new Handler(Looper.getMainLooper());
   private final Runnable persistDraft = () -> saveDraft();
 
@@ -32,24 +33,24 @@ public final class ThoughtsModule extends ThoughtsUi {
     drafts = activity.getSharedPreferences("draft", 0);
   }
 
-  public Feature screen(String id, String label) {
+  public Feature screen() {
     return new Feature() {
       public String id() {
-        return id;
+        return "thoughts";
       }
 
       public String label() {
-        return label;
+        return "想法";
       }
 
       public void render(LinearLayout parent) {
         surface = parent;
-        if (id.equals("capture")) capture();
+        if (composing) capture();
         else notes();
       }
 
       public String title() {
-        return id.equals("capture")
+        return composing
           ? drafts.getString("id", null) == null
             ? "写一条"
             : "编辑想法"
@@ -57,25 +58,21 @@ public final class ThoughtsModule extends ThoughtsUi {
       }
 
       public String headerAction() {
-        return id.equals("capture")
-          ? host.automaticSync()
-            ? "发布"
-            : "保存"
-          : "同步";
+        return composing ? (host.automaticSync() ? "发布" : "保存") : "同步";
       }
 
       public String headerIcon() {
-        return id.equals("notes") ? "sync" : "";
+        return !composing ? "sync" : "";
       }
 
       public void performHeaderAction() {
-        if (id.equals("capture")) saveNote();
+        if (composing) saveNote();
         else if (!account.isVerified()) host.navigate("server");
         else host.sync();
       }
 
       public void renderFooter(LinearLayout footer) {
-        if (!id.equals("capture")) return;
+        if (!composing) return;
         LinearLayout row = new LinearLayout(activity);
         row.setPadding(0, 0, 0, dp(4));
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -103,13 +100,39 @@ public final class ThoughtsModule extends ThoughtsUi {
         search = null;
       }
 
+      public void renderSettings(LinearLayout surface) {
+        new ThoughtsSettings(ThoughtsModule.this.host).render(surface);
+      }
+
+      public boolean hasBack() {
+        return composing;
+      }
+
+      public void back() {
+        host.navigate("notes");
+      }
+
       public void refresh() {
         renderFeed();
       }
     };
   }
 
+  public boolean isComposing() {
+    return composing;
+  }
+
+  public void page(boolean compose) {
+    saveDraft();
+    composing = compose;
+  }
+
   public void receiveShare(Intent intent) {
+    if ("app.thoughts.mobile.CAPTURE".equals(intent.getAction())) {
+      host.navigate("capture");
+      intent.setAction(null);
+      return;
+    }
     if (!Intent.ACTION_SEND.equals(intent.getAction())) return;
     String value = intent.getStringExtra(Intent.EXTRA_TEXT);
     if (value != null) {
@@ -252,7 +275,6 @@ public final class ThoughtsModule extends ThoughtsUi {
       }
       if (unique.size() > 12) throw new Exception("最多添加 12 个标签");
       for (String tag : unique) list.put(tag);
-      boolean edited = editingId != null;
       store.save(editingId, body, list, editingVersion);
       handler.removeCallbacks(persistDraft);
       drafts.edit().clear().commit();
@@ -260,8 +282,7 @@ public final class ThoughtsModule extends ThoughtsUi {
       tags = null;
       editingId = null;
       editingVersion = 0;
-      if (edited) host.navigate("notes");
-      else host.redraw();
+      host.navigate("notes");
       status("已保存到手机 · 等待同步");
       host.autoSync();
     } catch (Exception e) {
@@ -271,6 +292,22 @@ public final class ThoughtsModule extends ThoughtsUi {
   }
 
   private void notes() {
+    boolean hasDraft = !drafts.getString("content", "").trim().isEmpty();
+    surface.addView(
+      button(
+        hasDraft ? "继续草稿" : "写想法",
+        () -> host.navigate("capture"),
+        true
+      )
+    );
+    if (hasDraft) {
+      space(surface, 10);
+      TextView preview = text(drafts.getString("content", ""), 13, MUTED);
+      preview.setMaxLines(2);
+      preview.setEllipsize(android.text.TextUtils.TruncateAt.END);
+      surface.addView(preview);
+    }
+    space(surface, 20);
     search = input("搜索内容或标签", false);
     search.setContentDescription("搜索想法");
     search.setText(query);
@@ -330,7 +367,7 @@ public final class ThoughtsModule extends ThoughtsUi {
   }
 
   public void renderFeed() {
-    if (feed == null || !host.activeFeature().equals("notes")) return;
+    if (feed == null || !host.activeFeature().equals("thoughts")) return;
     feed.removeAllViews();
     try {
       String query = search

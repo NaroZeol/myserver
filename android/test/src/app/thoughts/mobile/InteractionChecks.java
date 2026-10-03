@@ -91,7 +91,7 @@ public final class InteractionChecks {
       find(screen.getWindow().getDecorView(), "保存").performClick();
     });
     TerminalChecks.check(
-      screen.activeFeature().equals("notes"),
+      screen.activeFeature().equals("thoughts"),
       "Saving an edit must return to the list"
     );
     TerminalChecks.check(

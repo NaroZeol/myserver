@@ -1,17 +1,17 @@
-package app.thoughts.mobile.modules.thoughts;
+package app.thoughts.mobile.core.connection;
 
 import app.thoughts.mobile.core.connection.ConnectionFailure;
 import app.thoughts.mobile.core.connection.ServerProfile;
 import org.json.JSONObject;
 
-public final class Api {
+public final class ServerApi {
 
   public final ServerProfile profile;
-  private final Transport transport;
+  private final SshRpc transport;
 
-  public Api(ServerProfile profile) {
+  public ServerApi(ServerProfile profile) {
     this.profile = profile;
-    transport = profile == null ? null : new SshTransport(profile);
+    transport = profile == null ? null : new SshRpc(profile);
   }
 
   public JSONObject request(String path, String method, JSONObject body)

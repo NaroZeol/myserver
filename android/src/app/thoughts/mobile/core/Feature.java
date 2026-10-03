@@ -34,9 +34,25 @@ public interface Feature {
 
   default void refresh() {}
 
+  default void resume() {}
+
+  default void pause() {}
+
+  default boolean hasBack() {
+    return false;
+  }
+
+  default void back() {}
+
+  default void renderSettings(LinearLayout surface) {}
+
   interface Host {
     Activity activity();
     ServerProfile serverProfile();
+    app.thoughts.mobile.core.connection.ServerApi api();
+    app.thoughts.mobile.core.connection.DeviceAccount account();
+    void authorizationChanged();
+    void renderFeatureSettings(LinearLayout surface);
     void configure(ServerProfile profile);
     ExecutorService executor();
     String activeFeature();

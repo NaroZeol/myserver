@@ -94,6 +94,7 @@
     control(enabled) { modifiers.CTRL = enabled ? 1 : 0; state(); },
     volumeControl(enabled) { volumeControl = enabled; state(); },
     resetModifiers() { modifiers.CTRL = modifiers.ALT = 0; volumeControl = false; state(); },
+    inputMode(internal) { terminal.textarea.inputMode = internal ? "none" : "text"; },
     focus() { terminal.scrollToBottom(); terminal.focus(); },
     blur() { terminal.blur(); },
     selection() { return terminal.getSelection(); },

@@ -1,6 +1,6 @@
 # myserver
 
-轻量 Android 服务器工具集，提供 SSH 终端、服务器状态和公开想法管理。App 与配套服务端在同一仓库维护，服务器地址、账户与凭据由使用者配置。
+轻量 Android 服务器工具集，以服务器连接、监控和 SSH 终端为核心，想法是其中的一个可扩展模块。App 与配套服务端在同一仓库维护，服务器地址、账户与凭据由使用者配置。
 
 ```text
 myserver/
@@ -26,9 +26,17 @@ myserver/
 - [想法功能](server/modules/thoughts/README.md)
 - [安全边界](SECURITY.md)
 
+## 使用
+
+- **服务器**：默认首页，集中管理连接、监控与终端。监控支持手动或 2 / 5 / 10 / 30 / 60 秒刷新，只在页面可见时自动采样。
+- **想法**：列表和编辑属于同一栏目，保存后回到列表；编辑中退出会保留草稿。自动同步与手动同步均可选。
+- **设置**：监控偏好、模块设置、数据操作和应用信息。
+
+首次授权可同时登记服务与终端的独立密钥，后续使用密钥连接，密码不落盘。终端支持内置模拟键盘与系统输入法切换。
+
 ## 扩展功能
 
-Android 公共层 `core/Feature.Host` 提供界面、导航、执行器和连接配置。模块在 `modules/<name>/` 实现 `Feature`，由 `MainActivity` 注册。终端独立使用 SSH shell；编译检查验证公共层和终端不依赖想法源码。当前服务页与想法同步共享受限 RPC 的设备身份，应用设置通过 `ThoughtsHost` 管理同步选项。
+Android 公共层 `core/Feature.Host` 提供界面、导航、执行器和连接配置。模块在 `modules/<name>/` 实现 `Feature`，由 `MainActivity` 注册。终端独立使用 SSH shell；编译检查验证公共层和终端不依赖想法源码。连接配置、设备授权和 RPC 位于公共层；服务器、终端和设置均不依赖想法实现。模块通过 `Feature.renderSettings` 提供自己的设置，想法的数据与同步操作使用独立的 `ThoughtsHost` 合约。
 
 服务端统一运行在 `~/.local/share/myserver/`，通过 SSH 按需运行，使用公共数据库和设备权限；用户级 systemd 负责发布与备份定时任务。功能在 `server/modules/<name>/` 实现，在 `server/modules/__init__.py` 注册，声明自己的 RPC 路由与权限。公共认证、服务器指标与备份不依赖想法表；系统状态在 `modules` 字段下汇总模块数据。
 

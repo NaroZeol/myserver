@@ -6,6 +6,7 @@ import android.view.WindowManager;
 import app.thoughts.mobile.InteractionChecks;
 import app.thoughts.mobile.core.connection.DeviceKey;
 import app.thoughts.mobile.core.connection.ServerProfile;
+import app.thoughts.mobile.core.connection.ShellIdentity;
 import app.thoughts.mobile.modules.thoughts.DeviceEnrollment;
 import app.thoughts.mobile.modules.thoughts.SshTransport;
 import java.nio.charset.StandardCharsets;
@@ -41,15 +42,12 @@ public final class TerminalChecks {
     return result.get();
   }
 
-  public static void run(
-    Instrumentation test,
-    ServerProfile profile,
-    byte[] password
-  ) throws Exception {
+  public static void run(Instrumentation test, ServerProfile profile)
+    throws Exception {
     check(
       !java.util.Arrays.equals(
         DeviceEnrollment.key().getPublicKeyBlob(),
-        new DeviceKey(TerminalAuth.keyId(profile)).getPublicKeyBlob()
+        new DeviceKey(ShellIdentity.keyId(profile)).getPublicKeyBlob()
       ),
       "Terminal must not reuse restricted RPC identity"
     );
@@ -73,13 +71,11 @@ public final class TerminalChecks {
       }
     );
     try {
-      session.start(profile, password, true);
+      session.start(profile, null, false);
       check(
         connected.await(35, TimeUnit.SECONDS),
         "Terminal enrollment/PTY failed: " + received
       );
-      for (byte b : password)
-        check(b == 0, "Terminal login password must be cleared");
       session.resize(91, 31);
       check(
         session.send(
@@ -113,7 +109,6 @@ public final class TerminalChecks {
       );
     } finally {
       session.close();
-      java.util.Arrays.fill(password, (byte) 0);
     }
     check(
       new SshTransport(profile)
@@ -289,6 +284,7 @@ public final class TerminalChecks {
       }
       picture.recycle();
       TerminalInteractionChecks.run(test, screen, surface, originalRows);
+      VirtualKeyboardChecks.run(test, screen, surface, active);
       test.runOnMainSync(() -> screen.disconnect());
       await(() -> !active.isConnected(), "Disconnect must close PTY");
       check(

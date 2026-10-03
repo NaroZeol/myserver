@@ -1,4 +1,4 @@
-package app.thoughts.mobile.modules.terminal;
+package app.thoughts.mobile.core.connection;
 
 import android.content.Context;
 import app.thoughts.mobile.core.connection.DeviceKey;
@@ -10,9 +10,9 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
 /** Shell authority uses an independent per-server key, never the restricted RPC identity. */
-final class TerminalAuth {
+public final class ShellIdentity {
 
-  static String keyId(ServerProfile profile) throws Exception {
+  public static String keyId(ServerProfile profile) throws Exception {
     byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(
       (
         profile.user +
@@ -30,7 +30,7 @@ final class TerminalAuth {
     return id.toString();
   }
 
-  static boolean registered(Context context, ServerProfile profile) {
+  public static boolean registered(Context context, ServerProfile profile) {
     try {
       return context
         .getSharedPreferences("terminal_keys", 0)
@@ -40,7 +40,7 @@ final class TerminalAuth {
     }
   }
 
-  static void remember(Context context, ServerProfile profile)
+  public static void remember(Context context, ServerProfile profile)
     throws Exception {
     if (
       !context
@@ -48,12 +48,10 @@ final class TerminalAuth {
         .edit()
         .putBoolean(keyId(profile), true)
         .commit()
-    ) throw new Exception(
-      "终端密钥已登记，但本机状态保存失败，请使用密码重新连接"
-    );
+    ) throw new Exception("设备密钥已登记，但本机状态保存失败，请重试连接");
   }
 
-  static void register(Session session, DeviceKey key) throws Exception {
+  public static void register(Session session, DeviceKey key) throws Exception {
     // Fixed program, public key over stdin. Preserve unrelated keys and serialize our own registrations.
     String script =
       "import os,sys,pathlib,fcntl,base64,contextlib\n" +
@@ -69,10 +67,13 @@ final class TerminalAuth {
       " if devices.is_dir(): locks.append(devices/'register.lock')\n" +
       " for path in locks:\n" +
       "  lock=stack.enter_context(path.open('a')); os.chmod(path,0o600); fcntl.flock(lock,fcntl.LOCK_EX)\n" +
+      " if (pathlib.Path.home()/'.local/share/myserver/maintenance').exists(): raise RuntimeError('maintenance')\n" +
       " p=root/'authorized_keys'\n" +
       " old=p.read_text() if p.exists() else ''\n" +
       " line='no-agent-forwarding,no-port-forwarding,no-X11-forwarding '+parts[0]+' '+parts[1]+' myserver-terminal'\n" +
-      " if not any(existing.split()[:3]==line.split()[:3] for existing in old.splitlines()):\n" +
+      " matches=[existing for existing in old.splitlines() if parts[1] in existing.split()]\n" +
+      " if any(existing.split()[:3]!=line.split()[:3] for existing in matches): raise RuntimeError('key has different authority')\n" +
+      " if not matches:\n" +
       "  with p.open('a') as out:\n" +
       "   os.chmod(p,0o600)\n" +
       "   out.write(('\\n' if old and not old.endswith('\\n') else '')+line+'\\n')\n" +

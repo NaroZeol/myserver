@@ -1,12 +1,14 @@
 package app.thoughts.mobile.modules.thoughts;
 
 import app.thoughts.mobile.core.connection.ConnectionFailure;
+import app.thoughts.mobile.core.connection.DeviceAccount;
+import app.thoughts.mobile.core.connection.ServerApi;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 public final class Sync {
 
-  public static String run(Store store, Account account, Api api)
+  public static String run(Store store, DeviceAccount account, ServerApi api)
     throws Exception {
     if (!account.isVerified()) return "已保存在手机 · 连接设备后同步";
     if (

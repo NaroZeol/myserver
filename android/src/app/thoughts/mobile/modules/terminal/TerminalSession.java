@@ -3,6 +3,7 @@ package app.thoughts.mobile.modules.terminal;
 import app.thoughts.mobile.core.connection.ConnectionFailure;
 import app.thoughts.mobile.core.connection.DeviceKey;
 import app.thoughts.mobile.core.connection.ServerProfile;
+import app.thoughts.mobile.core.connection.ShellIdentity;
 import app.thoughts.mobile.core.connection.SshConnection;
 import com.jcraft.jsch.ChannelShell;
 import com.jcraft.jsch.JSchException;
@@ -14,11 +15,14 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-/** A single PTY; independent of the API worker, with bounded input and back-pressured output. */
+/** A single PTY; independent of other feature workers, with bounded input and back-pressured output. */
 final class TerminalSession {
 
   interface Listener {
     void connected(boolean registered);
+
+    default void authorized() {}
+
     void output(byte[] data) throws Exception;
     void ended(String reason);
   }
@@ -66,20 +70,21 @@ final class TerminalSession {
       if (closed) return;
       DeviceKey key =
         !usedPassword || enroll
-          ? new DeviceKey(TerminalAuth.keyId(profile))
+          ? new DeviceKey(ShellIdentity.keyId(profile))
           : null;
       Session opened = SshConnection.open(profile, password, key);
       session = opened;
       if (password != null) Arrays.fill(password, (byte) 0);
       if (closed) return;
       if (enroll) {
-        TerminalAuth.register(opened, key);
+        ShellIdentity.register(opened, key);
         opened.disconnect();
         if (closed) return;
         usedPassword = false;
         session = opened = SshConnection.open(profile, null, key);
       }
       if (closed) return;
+      if (!usedPassword) listener.authorized();
       opened.setTimeout(0);
       opened.setServerAliveInterval(15000);
       opened.setServerAliveCountMax(3);

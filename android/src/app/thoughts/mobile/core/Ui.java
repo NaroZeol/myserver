@@ -226,7 +226,7 @@ public class Ui {
   public String errorMessage(Exception e) {
     return e instanceof ConnectionFailure
       ? e.getMessage()
-      : "操作未完成，本地内容已保留。请检查连接后重试。";
+      : "操作未完成，请检查连接后重试。";
   }
 
   public void copy(String value) {
@@ -284,7 +284,7 @@ public class Ui {
           c.drawLine(15, 11, 20, 11, p);
           c.drawLine(4, 18, 4, 13, p);
           c.drawLine(4, 13, 9, 13, p);
-        } else if (id.equals("notes")) {
+        } else if (id.equals("thoughts")) {
           c.drawRoundRect(5, 3, 19, 21, 2, 2, p);
           for (int y = 8; y < 18; y += 4) c.drawLine(9, y, 15, y, p);
         } else if (id.equals("terminal")) {

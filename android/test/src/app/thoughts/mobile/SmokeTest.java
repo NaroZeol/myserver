@@ -9,12 +9,15 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 import app.thoughts.mobile.core.connection.ConnectionFailure;
+import app.thoughts.mobile.core.connection.DeviceAccess;
+import app.thoughts.mobile.core.connection.DeviceAccount;
 import app.thoughts.mobile.core.connection.DeviceKey;
+import app.thoughts.mobile.core.connection.ServerApi;
 import app.thoughts.mobile.core.connection.ServerProfile;
+import app.thoughts.mobile.core.connection.ShellIdentity;
 import app.thoughts.mobile.core.connection.SshConnection;
+import app.thoughts.mobile.modules.server.ServerChecks;
 import app.thoughts.mobile.modules.terminal.TerminalChecks;
-import app.thoughts.mobile.modules.thoughts.Account;
-import app.thoughts.mobile.modules.thoughts.Api;
 import app.thoughts.mobile.modules.thoughts.DeviceEnrollment;
 import app.thoughts.mobile.modules.thoughts.SshTransport;
 import app.thoughts.mobile.modules.thoughts.Store;
@@ -82,7 +85,7 @@ public final class SmokeTest extends Instrumentation {
     }
     if ("visual".equals(arguments.getString("mode"))) {
       try {
-        new Account(getTargetContext()).clear();
+        new DeviceAccount(getTargetContext()).clear();
         getTargetContext()
           .getSharedPreferences("sync_settings", 0)
           .edit()
@@ -129,7 +132,6 @@ public final class SmokeTest extends Instrumentation {
         for (String page : new String[] {
           "capture",
           "notes",
-          "terminal",
           "server",
           "settings",
         }) {
@@ -188,7 +190,7 @@ public final class SmokeTest extends Instrumentation {
         "A fresh install must not contain a server"
       );
       try {
-        new Api(null).request("/session", "GET", null);
+        new ServerApi(null).request("/session", "GET", null);
         throw new AssertionError("Unconfigured API must reject requests");
       } catch (ConnectionFailure e) {
         check(e.code == 400, "Unconfigured API must explain setup");
@@ -201,7 +203,7 @@ public final class SmokeTest extends Instrumentation {
       checkDeviceSignature();
       Store store = new Store(getTargetContext());
       store.clear();
-      new Account(getTargetContext()).clear();
+      new DeviceAccount(getTargetContext()).clear();
       getTargetContext()
         .getSharedPreferences("draft", 0)
         .edit()
@@ -213,6 +215,22 @@ public final class SmokeTest extends Instrumentation {
         )
       );
       final MainActivity screen = activity;
+      runOnMainSync(() -> {
+        check(
+          screen.activeFeature().equals("server"),
+          "The application must open on the server workspace"
+        );
+        check(
+          findButton(screen.getWindow().getDecorView(), "记录") == null,
+          "Capture must not be a separate tab"
+        );
+        check(
+          findButton(screen.getWindow().getDecorView(), "终端") == null,
+          "Terminal must live inside the server workspace"
+        );
+        findButton(screen.getWindow().getDecorView(), "想法").performClick();
+        findButton(screen.getWindow().getDecorView(), "写想法").performClick();
+      });
       screenshot("capture");
       waitForIdleSync();
       runOnMainSync(() -> {
@@ -249,7 +267,7 @@ public final class SmokeTest extends Instrumentation {
       );
       screenshot("notes");
       runOnMainSync(() ->
-        findButton(screen.getWindow().getDecorView(), "记录").performClick()
+        findButton(screen.getWindow().getDecorView(), "写想法").performClick()
       );
       waitForIdleSync();
       runOnMainSync(() ->
@@ -271,7 +289,7 @@ public final class SmokeTest extends Instrumentation {
       );
       screenshot("settings");
       runOnMainSync(() ->
-        findButton(screen.getWindow().getDecorView(), "服务").performClick()
+        findButton(screen.getWindow().getDecorView(), "服务器").performClick()
       );
       waitForIdleSync();
       screenshot("server");
@@ -372,7 +390,7 @@ public final class SmokeTest extends Instrumentation {
         store.save(null, "Manual synchronization test", new JSONArray(), 0);
         screen
           .account()
-          .verified(new Api(configured).request("/session", "GET", null));
+          .verified(new ServerApi(configured).request("/session", "GET", null));
         runOnMainSync(() -> {
           screen.setAutomaticSync(false);
           screen.autoSync();
@@ -406,6 +424,7 @@ public final class SmokeTest extends Instrumentation {
           "Explicit sync must still upload records in manual mode"
         );
       }
+      ServerChecks.run(this, screen);
       InteractionChecks.run(this, screen);
       result.putString(
         "stream",
@@ -533,11 +552,12 @@ public final class SmokeTest extends Instrumentation {
     for (byte value : wrongPassword)
       check(value == 0, "Password must be cleared after a failed login");
     byte[] password = arguments.getString("ssh_password").getBytes("UTF-8");
-    byte[] terminalPassword = password.clone();
     arguments.remove("ssh_password");
-    org.json.JSONObject enrollment = DeviceEnrollment.register(
+    org.json.JSONObject enrollment = DeviceAccess.authorize(
+      getTargetContext(),
       profile,
-      password
+      password,
+      true
     );
     check(
       enrollment.optString("transport").equals("ssh"),
@@ -546,7 +566,7 @@ public final class SmokeTest extends Instrumentation {
     for (byte value : password)
       check(value == 0, "Password must be cleared after enrollment");
     SshTransport transport = new SshTransport(profile);
-    org.json.JSONObject session = new Api(restored).request(
+    org.json.JSONObject session = new ServerApi(restored).request(
       "/session",
       "GET",
       null
@@ -630,6 +650,16 @@ public final class SmokeTest extends Instrumentation {
       rejected = e.code == 495;
     }
     check(rejected, "Server host key mismatch must be rejected");
-    TerminalChecks.run(this, restored, terminalPassword);
+    check(
+      ShellIdentity.registered(getTargetContext(), restored),
+      "One authorization must also remember the separate terminal identity"
+    );
+    check(
+      DeviceAccess.authorize(getTargetContext(), restored, null, false)
+        .optString("transport")
+        .equals("ssh"),
+      "An authorized shell identity must enroll service access without a second password"
+    );
+    TerminalChecks.run(this, restored);
   }
 }

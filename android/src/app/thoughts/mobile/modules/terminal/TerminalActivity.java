@@ -14,6 +14,7 @@ import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
 import app.thoughts.mobile.core.connection.ServerProfile;
+import app.thoughts.mobile.core.connection.ShellIdentity;
 import java.nio.charset.StandardCharsets;
 import org.json.JSONObject;
 
@@ -27,8 +28,11 @@ public final class TerminalActivity extends Activity {
   private TerminalSurface terminal;
   private volatile TerminalSession connection;
   private TextView feedback, placeholder;
-  private Button connect, keyboardButton;
-  private LinearLayout header, selectionHeader;
+  private Button connect, keyboardButton, inputModeButton;
+  private LinearLayout header, selectionHeader, workspace;
+  private FrameLayout terminalFrame;
+  private VirtualKeyboard virtualKeyboard;
+  private boolean internalKeyboard;
   private TerminalKeys keys;
   private boolean busy, selecting;
   private int fontSize;
@@ -40,6 +44,10 @@ public final class TerminalActivity extends Activity {
       finish();
       return;
     }
+    internalKeyboard = getSharedPreferences("terminal_ui", 0).getBoolean(
+      "internal_keyboard",
+      false
+    );
     fontSize = getSharedPreferences("terminal_ui", 0).getInt("font", 14);
     getWindow().setStatusBarColor(BACKGROUND);
     getWindow().setNavigationBarColor(BACKGROUND);
@@ -99,13 +107,26 @@ public final class TerminalActivity extends Activity {
     feedback.setAccessibilityLiveRegion(
       android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE
     );
-    root.addView(feedback);
-    FrameLayout frame = new FrameLayout(this);
+    LinearLayout feedbackRow = new LinearLayout(this);
+    feedbackRow.setGravity(Gravity.CENTER_VERTICAL);
+    feedbackRow.addView(feedback, new LinearLayout.LayoutParams(0, -2, 1));
+    inputModeButton = button("", () -> chooseKeyboard());
+    inputModeButton.setMinHeight(dp(36));
+    inputModeButton.setMinimumHeight(dp(36));
+    feedbackRow.addView(
+      inputModeButton,
+      new LinearLayout.LayoutParams(-2, dp(36))
+    );
+    root.addView(feedbackRow);
+    workspace = new LinearLayout(this);
+    terminalFrame = new FrameLayout(this);
+    FrameLayout frame = terminalFrame;
     terminal = new TerminalSurface(
       this,
       new TerminalSurface.Listener() {
         public void ready() {
           connect.setEnabled(true);
+          terminal.keyboardMode(internalKeyboard);
           terminal.evaluateJavascript(
             "TerminalUI.font(" + fontSize + ")",
             null
@@ -163,7 +184,26 @@ public final class TerminalActivity extends Activity {
     placeholder.setGravity(Gravity.CENTER);
     placeholder.setPadding(dp(24), dp(24), dp(24), dp(24));
     frame.addView(placeholder, new FrameLayout.LayoutParams(-1, -1));
-    root.addView(frame, new LinearLayout.LayoutParams(-1, 0, 1));
+    workspace.addView(frame, new LinearLayout.LayoutParams(-1, 0, 1));
+    virtualKeyboard = new VirtualKeyboard(
+      this,
+      new VirtualKeyboard.Actions() {
+        public void text(String value) {
+          sendKey("key", value);
+        }
+
+        public void special(String value) {
+          sendKey("special", value);
+        }
+
+        public void systemInput() {
+          useKeyboard(false, true);
+        }
+      }
+    );
+    virtualKeyboard.setVisibility(View.GONE);
+    workspace.addView(virtualKeyboard);
+    root.addView(workspace, new LinearLayout.LayoutParams(-1, 0, 1));
     keys = new TerminalKeys(
       this,
       new TerminalKeys.Actions() {
@@ -184,6 +224,7 @@ public final class TerminalActivity extends Activity {
       }
     );
     root.addView(keys);
+    arrangeKeyboard();
     root.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
       boolean visible = keyboardVisible();
       String label = visible ? "收起" : "键盘";
@@ -224,6 +265,14 @@ public final class TerminalActivity extends Activity {
   }
 
   private boolean keyboardVisible() {
+    return (
+      (virtualKeyboard != null &&
+        virtualKeyboard.getVisibility() == View.VISIBLE) ||
+      systemKeyboardVisible()
+    );
+  }
+
+  private boolean systemKeyboardVisible() {
     if (
       android.os.Build.VERSION.SDK_INT >= 30 &&
       terminal.getRootWindowInsets() != null
@@ -243,7 +292,17 @@ public final class TerminalActivity extends Activity {
     InputMethodManager ime = (InputMethodManager) getSystemService(
       INPUT_METHOD_SERVICE
     );
-    if (keyboardVisible()) {
+    if (internalKeyboard) {
+      ime.hideSoftInputFromWindow(terminal.getWindowToken(), 0);
+      virtualKeyboard.setVisibility(
+        virtualKeyboard.getVisibility() == View.VISIBLE
+          ? View.GONE
+          : View.VISIBLE
+      );
+      arrangeKeyboard();
+      return;
+    }
+    if (systemKeyboardVisible()) {
       ime.hideSoftInputFromWindow(terminal.getWindowToken(), 0);
     } else {
       terminal.requestFocus();
@@ -254,6 +313,75 @@ public final class TerminalActivity extends Activity {
         );
       });
     }
+  }
+
+  private void sendKey(String method, String value) {
+    if (connection != null && connection.isConnected()) terminal.call(
+      method,
+      value
+    );
+    else feedback.setText("请先连接服务器");
+  }
+
+  private void chooseKeyboard() {
+    new AlertDialog.Builder(this)
+      .setTitle("终端输入方式")
+      .setSingleChoiceItems(
+        new String[] { "内置模拟键盘", "系统输入法" },
+        internalKeyboard ? 0 : 1,
+        (dialog, index) -> {
+          dialog.dismiss();
+          useKeyboard(index == 0, true);
+        }
+      )
+      .setNegativeButton("取消", null)
+      .show();
+  }
+
+  void useKeyboard(boolean internal, boolean show) {
+    (
+      (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)
+    ).hideSoftInputFromWindow(terminal.getWindowToken(), 0);
+    internalKeyboard = internal;
+    getSharedPreferences("terminal_ui", 0)
+      .edit()
+      .putBoolean("internal_keyboard", internal)
+      .apply();
+    terminal.keyboardMode(internal);
+    virtualKeyboard.stopRepeating();
+    virtualKeyboard.setVisibility(internal && show ? View.VISIBLE : View.GONE);
+    arrangeKeyboard();
+    if (!internal && show) terminal.postDelayed(() -> {
+      if (
+        !isDestroyed() && !internalKeyboard && !systemKeyboardVisible()
+      ) toggleKeyboard();
+    }, 200);
+  }
+
+  private void arrangeKeyboard() {
+    boolean side =
+      internalKeyboard &&
+      virtualKeyboard.getVisibility() == View.VISIBLE &&
+      getResources().getConfiguration().orientation ==
+        android.content.res.Configuration.ORIENTATION_LANDSCAPE;
+    workspace.setOrientation(
+      side ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL
+    );
+    terminalFrame.setLayoutParams(
+      side
+        ? new LinearLayout.LayoutParams(0, -1, 1)
+        : new LinearLayout.LayoutParams(-1, 0, 1)
+    );
+    virtualKeyboard.setLayoutParams(
+      side
+        ? new LinearLayout.LayoutParams(
+            (getResources().getDisplayMetrics().widthPixels * 46) / 100,
+            -1
+          )
+        : new LinearLayout.LayoutParams(-1, dp(192))
+    );
+    inputModeButton.setText(internalKeyboard ? "内置键盘 ▾" : "系统输入法 ▾");
+    inputModeButton.setContentDescription("切换输入方式");
   }
 
   private void setFont(int size) {
@@ -293,12 +421,13 @@ public final class TerminalActivity extends Activity {
     if (!focused && terminal != null && terminal.loaded) {
       terminal.evaluateJavascript("TerminalUI.volumeControl(false)", null);
       if (keys != null) keys.stopRepeating();
+      if (virtualKeyboard != null) virtualKeyboard.stopRepeating();
     }
   }
 
   private void login(boolean forcePassword) {
     if (busy || !terminal.loaded) return;
-    if (!forcePassword && TerminalAuth.registered(this, profile)) {
+    if (!forcePassword && ShellIdentity.registered(this, profile)) {
       begin(null, false);
       return;
     }
@@ -321,13 +450,14 @@ public final class TerminalActivity extends Activity {
     );
     form.addView(password);
     CheckBox remember = new CheckBox(this);
-    remember.setText("记住此设备：登记终端专用密钥");
+    remember.setText("记住此设备，下次免密连接");
+    remember.setChecked(true);
     remember.setTextSize(14);
     remember.setMinHeight(dp(48));
     form.addView(remember);
     TextView note = new TextView(this);
     note.setText(
-      "终端拥有该 SSH 账户的命令执行权限。密码只用于本次登录；勾选后独立登记终端密钥，不改变想法同步密钥。"
+      "终端拥有该 SSH 账户的命令执行权限。密码只用于首次授权，不会保存。记住设备后，终端和服务授权均可复用设备密钥。取消勾选则仅登录本次。"
     );
     note.setTextSize(12);
     form.addView(note);
@@ -383,16 +513,17 @@ public final class TerminalActivity extends Activity {
     final TerminalSession[] started = new TerminalSession[1];
     TerminalSession next = new TerminalSession(
       new TerminalSession.Listener() {
+        public void authorized() {
+          try {
+            ShellIdentity.remember(TerminalActivity.this, profile);
+          } catch (Exception e) {
+            runOnUiThread(() -> feedback.setText(e.getMessage()));
+          }
+        }
+
         public void connected(boolean registered) {
           runOnUiThread(() -> {
             if (isDestroyed() || connection != started[0]) return;
-            if (registered) {
-              try {
-                TerminalAuth.remember(TerminalActivity.this, profile);
-              } catch (Exception e) {
-                feedback.setText(e.getMessage());
-              }
-            }
             connect.setText("断开");
             feedback.setText("已连接 · " + profile.address());
           });
@@ -472,6 +603,7 @@ public final class TerminalActivity extends Activity {
     android.content.res.Configuration configuration
   ) {
     super.onConfigurationChanged(configuration);
+    arrangeKeyboard();
     keys.layoutKeys(
       configuration.orientation ==
         android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -591,7 +723,7 @@ public final class TerminalActivity extends Activity {
           if (index == 6) new AlertDialog.Builder(this)
             .setTitle("终端操作")
             .setMessage(
-              "Ctrl / Alt：点击用于下一个按键，长按锁定，再点解除。Ctrl 后按 C 可中断命令。\n\n方向键与翻页键：长按连发。长按 − 输入 |。\n\n音量下键：按住时作为 Ctrl，可在终端选项中关闭。\n\n双指缩放：调整字号。长按文字后拖动两个选区手柄，点击顶部复制；也可通过菜单选择文字。\n\n上滑浏览输出，点击「回到底部」回到提示符。返回时先取消选择或收起键盘，再确认关闭会话。"
+              "点击「内置键盘 / 系统输入法」切换输入方式。内置键盘支持 Shift 与数字符号；需要中文时切回系统输入法。\n\nCtrl / Alt：点击用于下一个按键，长按锁定，再点解除。Ctrl 后按 C 可中断命令。\n\n方向键与翻页键：长按连发。长按 − 输入 |。\n\n音量下键：按住时作为 Ctrl，可在终端选项中关闭。\n\n双指缩放：调整字号。长按文字后拖动两个选区手柄，点击顶部复制；也可通过菜单选择文字。\n\n上滑浏览输出，点击「回到底部」回到提示符。返回时先取消选择或收起键盘，再确认关闭会话。"
             )
             .setPositiveButton("知道了", null)
             .show();

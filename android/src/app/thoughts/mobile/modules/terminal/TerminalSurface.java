@@ -28,10 +28,36 @@ final class TerminalSurface extends WebView {
     new ConcurrentHashMap<>();
   private final AtomicInteger serial = new AtomicInteger();
   private volatile boolean disposed;
+  private boolean internalKeyboard;
   volatile boolean loaded;
   volatile String rendererIssue = "";
   int columns = 80,
     rows = 24;
+
+  void keyboardMode(boolean internal) {
+    internalKeyboard = internal;
+    if (loaded) evaluateJavascript(
+      "TerminalUI.inputMode(" + internal + ")",
+      null
+    );
+    (
+      (android.view.inputmethod.InputMethodManager) getContext().getSystemService(
+        Context.INPUT_METHOD_SERVICE
+      )
+    ).restartInput(this);
+  }
+
+  @Override
+  public android.view.inputmethod.InputConnection onCreateInputConnection(
+    android.view.inputmethod.EditorInfo info
+  ) {
+    return internalKeyboard ? null : super.onCreateInputConnection(info);
+  }
+
+  @Override
+  public boolean onCheckIsTextEditor() {
+    return !internalKeyboard && super.onCheckIsTextEditor();
+  }
 
   @SuppressLint({ "SetJavaScriptEnabled", "AddJavascriptInterface" })
   TerminalSurface(Context context, Listener listener) {

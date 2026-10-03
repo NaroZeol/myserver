@@ -3,12 +3,12 @@ package app.thoughts.mobile.shell;
 import android.app.AlertDialog;
 import android.widget.LinearLayout;
 import app.thoughts.mobile.core.Feature;
-import app.thoughts.mobile.modules.thoughts.ThoughtsHost;
-import app.thoughts.mobile.modules.thoughts.ThoughtsUi;
+import app.thoughts.mobile.core.Ui;
+import app.thoughts.mobile.modules.server.MonitorSettings;
 
-public final class SettingsFeature extends ThoughtsUi implements Feature {
+public final class SettingsFeature extends Ui implements Feature {
 
-  public SettingsFeature(ThoughtsHost host) {
+  public SettingsFeature(Feature.Host host) {
     super(host);
   }
 
@@ -21,52 +21,26 @@ public final class SettingsFeature extends ThoughtsUi implements Feature {
   }
 
   public void render(LinearLayout surface) {
-    int count = 0;
-    try {
-      count = store.entries().size();
-    } catch (Exception ignored) {}
-    LinearLayout syncSettings = card(surface, "想法同步", "");
-    android.widget.Switch automatic = new android.widget.Switch(activity);
-    automatic.setText("自动同步");
-    automatic.setTextSize(15);
-    automatic.setTextColor(INK);
-    automatic.setMinHeight(dp(52));
-    automatic.setChecked(host.automaticSync());
-    automatic.setOnCheckedChangeListener((button, checked) ->
-      host.setAutomaticSync(checked)
+    LinearLayout monitoring = card(surface, "监控", "");
+    setting(monitoring, "刷新间隔", MonitorSettings.label(activity), () ->
+      MonitorSettings.show(activity, () -> host.redraw())
     );
-    syncSettings.addView(automatic);
-    syncSettings.addView(
-      text(
-        host.automaticSync()
-          ? "保存、打开 App 或恢复网络时自动同步。"
-          : "只保存到本机，点击同步后统一发布。",
-        12,
-        MUTED
-      )
+    monitoring.addView(
+      text("仅在服务器页可见时自动刷新，离开页面或锁屏后暂停。", 12, MUTED)
     );
-    LinearLayout data = card(surface, "数据", "");
-    setting(data, "本机记录", count + " 条", null);
-    setting(data, "导出记录与草稿", "", () -> host.export(false));
-    if (account.isVerified() && account.can("thoughts")) setting(
-      data,
-      "导出服务器历史",
-      "",
-      () -> host.export(true)
-    );
-    setting(data, "同步记录", "", () ->
-      new AlertDialog.Builder(activity)
-        .setTitle("最近同步")
-        .setMessage(account.lastSync())
-        .setPositiveButton("关闭", null)
-        .show()
-    );
-    setting(data, "清除本机记录与草稿", "", () -> host.disconnect());
+    host.renderFeatureSettings(surface);
     LinearLayout about = card(surface, "关于", "");
-    setting(about, "想法", "1.7.1", null);
+    String version = "";
+    try {
+      version = activity
+        .getPackageManager()
+        .getPackageInfo(activity.getPackageName(), 0)
+        .versionName;
+    } catch (Exception ignored) {}
+    setting(about, "myserver", version, null);
     setting(about, "开源许可", "", () -> showLicenses());
     space(surface, 32);
-    android.widget.TextView note = text("一些想法，一点记录。", 12, MUTED);
+    android.widget.TextView note = text("你的服务器，随身可用。", 12, MUTED);
     note.setGravity(android.view.Gravity.CENTER);
     surface.addView(note);
   }
