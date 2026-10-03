@@ -1,8 +1,8 @@
 # 想法模块
 
-[返回 Server Kit](../../README.md) · [Android 构建](../../android/README.md)
+[返回 myserver](../../README.md) · [Android 构建](../../android/README.md)
 
-想法是 Server Kit 的一个功能模块，负责公开想法的记录、离线草稿、标签、搜索、回收站、编辑历史、冲突保留与 Gist 发布。Android 实现在 `../../android/src/app/thoughts/mobile/modules/thoughts/`；此目录包含配套后端及部署工具。终端模块无需安装这个服务。
+想法是 myserver 的一个功能模块，负责公开想法的记录、离线草稿、标签、搜索、回收站、编辑历史、冲突保留与 Gist 发布。Android 实现在 `../../android/src/app/thoughts/mobile/modules/thoughts/`；此目录包含配套后端及部署工具。终端模块无需安装这个服务。
 
 ## 工作方式
 
@@ -21,7 +21,7 @@ App 不预置任何服务器、用户名、主机公钥或 Gist ID。首次在�
 使用 SSH config 中自行配置的别名，或 `user@host`：
 
 ```sh
-bash tools/server-kit/modules/thoughts/deploy/stage.sh my-server
+bash modules/thoughts/deploy/stage.sh my-server
 ssh -t my-server 'bash ~/.local/share/thoughts/deploy/activate.sh'
 ```
 
@@ -55,8 +55,8 @@ python3 ~/.local/share/thoughts/deploy/register-device.py revoke --id DEVICE_ID
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install -r tools/server-kit/modules/thoughts/server/requirements.txt pytest==8.4.2
-.venv/bin/python -m pytest tools/server-kit/modules/thoughts/server/tests -q
+.venv/bin/pip install -r modules/thoughts/server/requirements.txt pytest==8.4.2
+.venv/bin/python -m pytest modules/thoughts/server/tests -q
 ```
 
 本地 Web 管理可用 `THOUGHTS_DEV=1 THOUGHTS_ORIGIN=http://127.0.0.1:8765` 启动 Gunicorn；开发时将 `THOUGHTS_DATABASE` 指向测试数据库。恢复备份前停止 API 和发布定时器，另存数据库及 WAL，恢复服务用户所有权和 `0600` 权限，再启动服务。

@@ -1,9 +1,9 @@
-# Server Kit
+# myserver
 
 轻量 Android 服务器工具集。公共层提供服务器配置、主机身份核验、SSH 与设备密钥；想法、终端和服务概览是独立的功能入口。
 
 ```text
-tools/server-kit/
+myserver/
 ├── android/                  # App、公共能力、各功能模块、测试和构建
 │   ├── src/app/thoughts/mobile/
 │   │   ├── MainActivity.java # 应用组装、导航与生命周期入口
@@ -25,7 +25,9 @@ tools/server-kit/
 - [想法模块及服务器部署](modules/thoughts/README.md)
 - [终端操作与实现](android/TERMINAL.md)
 
-App 的默认安装包为 `android/build/server-kit.apk`。博客仍位于仓库根目录，工具集位于 `tools/`，由 Jekyll 排除；博客正文和前端不属于 App 的构建输入。
+本仓库同时维护 Android App、配套服务端、部署脚本与 CI。想法是其中一个模块，终端和后续服务器工具共享连接能力。博客独立维护，只消费 Gist 发布的数据，不依赖本仓库的管理服务。
+
+App 的默认安装包为 `android/build/server-kit.apk`。安装与构建见 [Android 文档](android/README.md)，想法功能的配套部署见 [模块文档](modules/thoughts/README.md)。
 
 ## 模块边界
 
@@ -39,4 +41,8 @@ App 的默认安装包为 `android/build/server-kit.apk`。博客仍位于仓库
 
 Android application ID `app.thoughts.mobile`、主入口组件、数据库名、偏好设置名和已登记密钥别名保持兼容，因此新目录下的 APK 可以覆盖安装。Java 功能包的移动不迁移用户数据。服务器的想法服务运行目录、协议和 systemd 单元属于该模块，也保持兼容。
 
-`.github/workflows/server-kit-android.yml` 仅响应 Android 源码、资源、构建/测试脚本和 SSH 集成测试依赖；说明文档、博客和无关服务文件不会触发 App 构建。想法后端由 `thoughts-server.yml` 单独验证，博客由 `blog.yml` 验证。
+`.github/workflows/server-kit-android.yml` 仅响应 Android 源码、资源、构建/测试脚本和 SSH 集成测试依赖；说明文档、博客和无关服务文件不会触发 App 构建。想法后端由 `thoughts-server.yml` 单独验证。博客的构建、页面与读取测试由博客仓库负责。
+
+[迁移说明](docs/repository-migration.md)记录历史来源与兼容边界。
+
+[发布前安全审查](docs/security-review.md)记录检查范围、隐私处理和授权边界。

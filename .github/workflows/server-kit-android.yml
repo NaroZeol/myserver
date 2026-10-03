@@ -1,36 +1,36 @@
-name: Server Kit Android
+name: myserver Android
 on:
   push:
     paths:
-      - 'tools/server-kit/android/src/**'
-      - 'tools/server-kit/android/res/**'
-      - 'tools/server-kit/android/assets/**'
-      - 'tools/server-kit/android/test/**'
-      - 'tools/server-kit/android/*.sh'
-      - 'tools/server-kit/android/AndroidManifest.xml'
-      - 'tools/server-kit/modules/thoughts/server/app.py'
-      - 'tools/server-kit/modules/thoughts/server/publisher.py'
-      - 'tools/server-kit/modules/thoughts/server/system_metrics.py'
-      - 'tools/server-kit/modules/thoughts/server/ssh_gateway.py'
-      - 'tools/server-kit/modules/thoughts/server/requirements.txt'
-      - 'tools/server-kit/modules/thoughts/deploy/register-device.py'
-      - 'tools/server-kit/modules/thoughts/deploy/ssh-gateway.sh'
+      - 'android/src/**'
+      - 'android/res/**'
+      - 'android/assets/**'
+      - 'android/test/**'
+      - 'android/*.sh'
+      - 'android/AndroidManifest.xml'
+      - 'modules/thoughts/server/app.py'
+      - 'modules/thoughts/server/publisher.py'
+      - 'modules/thoughts/server/system_metrics.py'
+      - 'modules/thoughts/server/ssh_gateway.py'
+      - 'modules/thoughts/server/requirements.txt'
+      - 'modules/thoughts/deploy/register-device.py'
+      - 'modules/thoughts/deploy/ssh-gateway.sh'
       - '.github/workflows/server-kit-android.yml'
   pull_request:
     paths:
-      - 'tools/server-kit/android/src/**'
-      - 'tools/server-kit/android/res/**'
-      - 'tools/server-kit/android/assets/**'
-      - 'tools/server-kit/android/test/**'
-      - 'tools/server-kit/android/*.sh'
-      - 'tools/server-kit/android/AndroidManifest.xml'
-      - 'tools/server-kit/modules/thoughts/server/app.py'
-      - 'tools/server-kit/modules/thoughts/server/publisher.py'
-      - 'tools/server-kit/modules/thoughts/server/system_metrics.py'
-      - 'tools/server-kit/modules/thoughts/server/ssh_gateway.py'
-      - 'tools/server-kit/modules/thoughts/server/requirements.txt'
-      - 'tools/server-kit/modules/thoughts/deploy/register-device.py'
-      - 'tools/server-kit/modules/thoughts/deploy/ssh-gateway.sh'
+      - 'android/src/**'
+      - 'android/res/**'
+      - 'android/assets/**'
+      - 'android/test/**'
+      - 'android/*.sh'
+      - 'android/AndroidManifest.xml'
+      - 'modules/thoughts/server/app.py'
+      - 'modules/thoughts/server/publisher.py'
+      - 'modules/thoughts/server/system_metrics.py'
+      - 'modules/thoughts/server/ssh_gateway.py'
+      - 'modules/thoughts/server/requirements.txt'
+      - 'modules/thoughts/deploy/register-device.py'
+      - 'modules/thoughts/deploy/ssh-gateway.sh'
       - '.github/workflows/server-kit-android.yml'
   workflow_dispatch:
 permissions:
@@ -47,12 +47,14 @@ jobs:
       matrix:
         api: [29, 35]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
         with:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
@@ -62,11 +64,11 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/terminal-tests" --no-save playwright@1.63.0
           "$RUNNER_TEMP/terminal-tests/node_modules/.bin/playwright" install --with-deps chromium
-          PLAYWRIGHT_MODULE="$RUNNER_TEMP/terminal-tests/node_modules/playwright/index.mjs" node tools/server-kit/android/test/terminal-renderer.mjs
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/terminal-tests/node_modules/playwright/index.mjs" node android/test/terminal-renderer.mjs
       - name: Prepare signing key
         env:
-          KEYSTORE_BASE64: ${{ secrets.SERVER_KIT_KEYSTORE_BASE64 || secrets.THOUGHTS_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.SERVER_KIT_KEYSTORE_PASSWORD || secrets.THOUGHTS_KEYSTORE_PASSWORD }}
+          KEYSTORE_BASE64: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && (secrets.SERVER_KIT_KEYSTORE_BASE64 || secrets.THOUGHTS_KEYSTORE_BASE64) || '' }}
+          KEYSTORE_PASSWORD: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && (secrets.SERVER_KIT_KEYSTORE_PASSWORD || secrets.THOUGHTS_KEYSTORE_PASSWORD) || '' }}
         shell: bash
         run: |
           umask 077
@@ -87,12 +89,12 @@ jobs:
         run: |
           export ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar"
           export ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
-          bash tools/server-kit/android/build.sh
-          bash tools/server-kit/android/check-boundaries.sh
-      - uses: actions/upload-artifact@v4
+          bash android/build.sh
+          bash android/check-boundaries.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: server-kit-android-${{ env.APK_KIND }}-api${{ matrix.api }}
-          path: tools/server-kit/android/build/server-kit.apk
+          path: android/build/server-kit.apk
           retention-days: 14
       - name: Enable KVM
         run: |
@@ -100,9 +102,9 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Prepare isolated SSH fixture
-        run: bash tools/server-kit/android/test/ssh-fixture.sh
+        run: bash android/test/ssh-fixture.sh
       - name: Native Android smoke tests
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         env:
           SERVER_KIT_KEYSTORE: ${{ runner.temp }}/thoughts.jks
           SERVER_KIT_KEYSTORE_PASSWORD_FILE: ${{ runner.temp }}/signing-password
@@ -111,13 +113,16 @@ jobs:
           api-level: ${{ matrix.api }}
           arch: x86_64
           disable-animations: true
-          script: ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar" ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0" bash tools/server-kit/android/test.sh
-      - uses: actions/upload-artifact@v4
+          script: ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar" ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0" bash android/test.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: server-kit-android-verification-api${{ matrix.api }}
           path: |
-            tools/server-kit/android/build/test/screenshots/
-            tools/server-kit/android/build/test/result.txt
-            tools/server-kit/android/build/ssh-fixture/*.log
+            android/build/test/screenshots/
+            android/build/test/result.txt
+            android/build/ssh-fixture/*.log
           retention-days: 14
+      - name: Remove temporary signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/thoughts.jks" "$RUNNER_TEMP/signing-password"

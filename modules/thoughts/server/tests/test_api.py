@@ -161,11 +161,3 @@ def test_write_during_gist_upload_stays_pending_and_publishers_are_serialized(ap
     assert publisher.publish_once(app.config["DATABASE"], writer=snapshots.append)
     assert len(json.loads(snapshots[0])) == 2
     assert not owner.get("/api/publication").json["pending"]
-
-
-def test_reader_uses_only_gist():
-    root = next(parent for parent in Path(__file__).resolve().parents if (parent / "_config.yml").is_file())
-    source = (root / "assets/js/thoughts.js").read_text()
-    assert "feed.dataset.gist" in source
-    assert "/api/" not in source and "fetch(" in source
-    assert "thoughts_gist_url" in (root / "_pages/thoughts.md").read_text()

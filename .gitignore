@@ -1,0 +1,17 @@
+android/build/
+.venv/
+.env
+.env.*
+!.env.example
+__pycache__/
+.pytest_cache/
+*.pyc
+*.jks
+*.keystore
+*.apk
+*.idsig
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.log
+.DS_Store

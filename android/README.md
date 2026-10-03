@@ -1,4 +1,4 @@
-# Server Kit · Android
+# myserver · Android
 
 [工具集与模块结构](../README.md) · [终端说明](TERMINAL.md) · [想法服务](../modules/thoughts/README.md)
 
@@ -14,13 +14,13 @@ export ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar"
 export ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
 export SERVER_KIT_KEYSTORE=/path/to/private/signing.jks
 export SERVER_KIT_KEYSTORE_PASSWORD_FILE=/path/to/private/signing-password
-bash tools/server-kit/android/build.sh
-bash tools/server-kit/android/check-boundaries.sh
+bash android/build.sh
+bash android/check-boundaries.sh
 ```
 
-安装包：`tools/server-kit/android/build/server-kit.apk`。签名别名仍为 `thoughts`；使用原签名即可覆盖更新。构建目录已被 Git 忽略，私钥和密码文件不进入仓库。构建仍接受旧的 `THOUGHTS_KEYSTORE` / `THOUGHTS_KEYSTORE_PASSWORD_FILE` 环境变量。
+安装包：`android/build/server-kit.apk`。签名别名仍为 `thoughts`；使用原签名即可覆盖更新。构建目录已被 Git 忽略，私钥和密码文件不进入仓库。构建仍接受旧的 `THOUGHTS_KEYSTORE` / `THOUGHTS_KEYSTORE_PASSWORD_FILE` 环境变量。
 
-GitHub Actions 推荐 secrets `SERVER_KIT_KEYSTORE_BASE64` 和 `SERVER_KIT_KEYSTORE_PASSWORD`，也兼容已有 `THOUGHTS_KEYSTORE_BASE64` / `THOUGHTS_KEYSTORE_PASSWORD`。未配置时生成 `.preview` 包，不能覆盖正式版；artifact 名为 `server-kit-android-<release|preview>-api<29|35>`。
+GitHub Actions 推荐 secrets `SERVER_KIT_KEYSTORE_BASE64` 和 `SERVER_KIT_KEYSTORE_PASSWORD`，也兼容已有 `THOUGHTS_KEYSTORE_BASE64` / `THOUGHTS_KEYSTORE_PASSWORD`。仅主线构建可以读取正式签名；其他分支、PR 或未配置 secrets 时生成 `.preview` 包，不能覆盖正式版；artifact 名为 `server-kit-android-<release|preview>-api<29|35>`。
 
 ## 验证
 
@@ -31,7 +31,7 @@ Android 10 / 15 模拟器覆盖离线草稿、同步、服务器身份、设备�
 终端渲染交互测试（开发时安装 Playwright 及 Chromium）：
 
 ```sh
-node tools/server-kit/android/test/terminal-renderer.mjs
+node android/test/terminal-renderer.mjs
 ```
 
 可通过 `PLAYWRIGHT_MODULE` 指向已有 Playwright 的 `index.mjs`。终端依赖随 APK 打包，维护更新使用 `vendor-terminal.sh`，正常构建不依赖 npm 或 CDN。
