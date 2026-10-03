@@ -41,7 +41,7 @@ App 的默认安装包为 `android/build/server-kit.apk`。安装与构建见 [A
 
 ## 兼容与 CI
 
-Android application ID `app.thoughts.mobile`、主入口组件、数据库名、偏好设置名和已登记密钥别名保持兼容，因此新目录下的 APK 可以覆盖安装。Java 功能包的移动不迁移用户数据。服务器的想法服务运行目录、协议和 systemd 单元属于该模块，也保持兼容。
+Android application ID `app.thoughts.mobile`、主入口组件和数据格式保持稳定。1.7.1 起使用全新的通用签名证书；旧证书版本需要先同步或导出本机内容，再卸载重装并重新登记设备，详见 [签名说明](android/SIGNING.md)。服务器的想法服务运行目录、协议和 systemd 单元属于该模块，继续兼容现有部署。
 
 `.github/workflows/server-kit-android.yml` 仅响应 Android 源码、资源、构建/测试脚本和 SSH 集成测试依赖；说明文档、博客和无关服务文件不会触发 App 构建。想法后端由 `thoughts-server.yml` 单独验证。博客的构建、页面与读取测试由博客仓库负责。
 

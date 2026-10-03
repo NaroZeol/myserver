@@ -43,7 +43,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     env:
-      SERVER_KIT_KEY_ALIAS: ${{ vars.SERVER_KIT_KEY_ALIAS || 'thoughts' }}
+      SERVER_KIT_KEY_ALIAS: ${{ vars.SERVER_KIT_KEY_ALIAS || 'myserver' }}
     strategy:
       fail-fast: false
       matrix:
@@ -69,24 +69,24 @@ jobs:
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/terminal-tests/node_modules/playwright/index.mjs" node android/test/terminal-renderer.mjs
       - name: Prepare signing key
         env:
-          KEYSTORE_BASE64: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && (secrets.SERVER_KIT_KEYSTORE_BASE64 || secrets.THOUGHTS_KEYSTORE_BASE64) || '' }}
-          KEYSTORE_PASSWORD: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && (secrets.SERVER_KIT_KEYSTORE_PASSWORD || secrets.THOUGHTS_KEYSTORE_PASSWORD) || '' }}
+          KEYSTORE_BASE64: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && secrets.SERVER_KIT_KEYSTORE_BASE64 || '' }}
+          KEYSTORE_PASSWORD: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && secrets.SERVER_KIT_KEYSTORE_PASSWORD || '' }}
         shell: bash
         run: |
           umask 077
           if [[ -n "$KEYSTORE_BASE64" && -n "$KEYSTORE_PASSWORD" ]]; then
-            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/thoughts.jks"
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/myserver.jks"
             printf '%s' "$KEYSTORE_PASSWORD" > "$RUNNER_TEMP/signing-password"
             echo 'APK_KIND=release' >> "$GITHUB_ENV"
           else
             printf '%s' 'android-ci-only' > "$RUNNER_TEMP/signing-password"
-            keytool -genkeypair -keystore "$RUNNER_TEMP/thoughts.jks" -storepass:file "$RUNNER_TEMP/signing-password" -alias "$SERVER_KIT_KEY_ALIAS" -keyalg RSA -keysize 3072 -validity 30 -dname 'CN=myserver CI Preview'
+            keytool -genkeypair -keystore "$RUNNER_TEMP/myserver.jks" -storepass:file "$RUNNER_TEMP/signing-password" -alias "$SERVER_KIT_KEY_ALIAS" -keyalg RSA -keysize 3072 -validity 30 -dname 'CN=myserver CI Preview'
             echo 'APK_KIND=preview' >> "$GITHUB_ENV"
             echo 'SERVER_KIT_PREVIEW=1' >> "$GITHUB_ENV"
           fi
       - name: Build native APK
         env:
-          SERVER_KIT_KEYSTORE: ${{ runner.temp }}/thoughts.jks
+          SERVER_KIT_KEYSTORE: ${{ runner.temp }}/myserver.jks
           SERVER_KIT_KEYSTORE_PASSWORD_FILE: ${{ runner.temp }}/signing-password
         run: |
           export ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar"
@@ -108,7 +108,7 @@ jobs:
       - name: Native Android smoke tests
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         env:
-          SERVER_KIT_KEYSTORE: ${{ runner.temp }}/thoughts.jks
+          SERVER_KIT_KEYSTORE: ${{ runner.temp }}/myserver.jks
           SERVER_KIT_KEYSTORE_PASSWORD_FILE: ${{ runner.temp }}/signing-password
           SERVER_KIT_SSH_TEST: '1'
         with:
@@ -127,4 +127,4 @@ jobs:
           retention-days: 14
       - name: Remove temporary signing material
         if: always()
-        run: rm -f "$RUNNER_TEMP/thoughts.jks" "$RUNNER_TEMP/signing-password"
+        run: rm -f "$RUNNER_TEMP/myserver.jks" "$RUNNER_TEMP/signing-password"

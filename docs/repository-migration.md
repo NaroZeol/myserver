@@ -10,7 +10,7 @@ Android App 与配套服务端从博客仓库拆出，在同一仓库维护、�
 
 ## 兼容边界
 
-- App 保持 `app.thoughts.mobile`、原签名、数据库、偏好设置和设备密钥别名；可覆盖安装，已有数据不需要导出迁移。
+- 仓库迁移保留了 application ID `app.thoughts.mobile` 和数据格式。后续 1.7.1 已改用全新的通用签名证书；旧证书安装不能直接覆盖，需要先同步或导出本机内容，再卸载重装并重新登记设备，见 [签名说明](../android/SIGNING.md)。
 - 服务端保留 `~/.local/share/thoughts/`、systemd 单元、受限 SSH 协议和 Gist 配置；仓库迁移无需重新部署或登记设备。
 - 服务器地址、用户名和凭据继续由使用者配置。GitHub 写入凭据仅保存在部署服务器。
 - Android 与服务端各自按文件路径触发 CI；文档改动不会触发 APK 构建。
