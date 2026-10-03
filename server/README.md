@@ -6,7 +6,7 @@
 
 ## 部署
 
-需要 Linux、Python 3.10+、pip、OpenSSH 与 systemd。API 仅监听 `127.0.0.1:8765`；App 使用现有 SSH 端口，无需公网 HTTP、HTTPS 或反向代理。服务以普通用户运行，App 的 SSH 账户使用同一用户。
+需要 Linux、Python 3.10+、pip、OpenSSH 与 systemd。API 仅监听 `127.0.0.1:8765`；App 使用现有 SSH 端口，无需公网 HTTP、HTTPS 或反向代理。服务由用户级 systemd 管理，App 的 SSH 账户使用同一用户。
 
 在开发电脑上，从仓库根目录运行：
 
@@ -16,9 +16,17 @@ bash deploy/stage.sh
 ssh -t "$MYSERVER_SSH_TARGET" 'bash ~/.local/share/myserver/deploy/activate.sh'
 ```
 
-`stage.sh` 接受 SSH 别名或 `user@host`，命令行参数优先于环境变量。脚本上传服务源码、部署工具和 Python 依赖，不上传 `.env`、本机数据库或 APK。`activate.sh` 通过 sudo 安装 systemd 单元；账户、主目录和属组均在安装时读取。
+`stage.sh` 接受 SSH 别名或 `user@host`，命令行参数优先于环境变量。脚本上传服务源码、部署工具和 Python 依赖，不上传 `.env`、本机数据库或 APK。`activate.sh` 将单元安装到 `${XDG_CONFIG_HOME:-~/.config}/systemd/user/`，以当前用户启用和启动服务，不需要 sudo。运行目录使用当前用户的主目录。
 
 本机配置可参照 [deploy/.env.example](../deploy/.env.example)，放入被 Git 忽略的 `.env` 后显式加载。环境变量不会自动传递到服务器或 systemd。使用想法发布时，按[模块说明](modules/thoughts/README.md)另行配置 Gist；系统状态和设备授权无需 Gist 凭据。
+
+用户管理器需可用，可先运行 `systemctl --user show-environment` 检查。若希望服务器重启后自动运行、退出 SSH 后继续运行，需开启该账户的 linger：
+
+```sh
+loginctl show-user "$USER" -p Linger
+```
+
+若结果为 `Linger=no`，由管理员执行一次 `sudo loginctl enable-linger 用户名`。开启后，更新、启停和日志查询均使用普通用户权限。不要以 sudo 运行激活脚本。安装 Python、pip 等系统软件及修改防火墙仍属于系统管理操作。
 
 ## 运行目录
 
@@ -44,9 +52,10 @@ ssh -t "$MYSERVER_SSH_TARGET" 'bash ~/.local/share/myserver/deploy/activate.sh'
 python3 ~/.local/share/myserver/deploy/register-device.py
 python3 ~/.local/share/myserver/deploy/register-device.py list
 python3 ~/.local/share/myserver/deploy/register-device.py revoke --id DEVICE_ID
-systemctl status myserver.service
-systemctl list-timers 'myserver-*'
-journalctl -u myserver.service -n 50
+systemctl --user status myserver.service
+systemctl --user restart myserver.service
+systemctl --user list-timers 'myserver-*'
+journalctl --user -u myserver.service -n 50
 ```
 
 设备登记默认授权已安装模块的能力；可用 `--capabilities system.read` 只授予系统状态读取权限。条目使用 `restrict` 和固定强制命令，只接受 `myserver-rpc-v1`。不允许 shell、SFTP、转发或客户端自行提升权限；登记与撤销保留其他 SSH 公钥。App 终端使用独立密钥，具有 SSH 账户本身的 shell 权限。

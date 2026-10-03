@@ -1,11 +1,8 @@
 [Unit]
 Description=myserver API
-After=network.target
 
 [Service]
 Type=simple
-User=@USER@
-Group=@GROUP@
 WorkingDirectory=@DATA_DIR@/app
 Environment=PYTHONPATH=@DATA_DIR@/python
 Environment=MYSERVER_DATABASE=@DATA_DIR@/myserver.sqlite
@@ -18,10 +15,6 @@ Restart=on-failure
 RestartSec=3
 UMask=0077
 NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=@DATA_DIR@
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

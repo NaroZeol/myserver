@@ -29,7 +29,7 @@ myserver/
 
 Android 公共层 `core/Feature.Host` 提供界面、导航、执行器和连接配置。模块在 `modules/<name>/` 实现 `Feature`，由 `MainActivity` 注册。终端独立使用 SSH shell；编译检查验证公共层和终端不依赖想法源码。当前服务页与想法同步共享受限 RPC 的设备身份，应用设置通过 `ThoughtsHost` 管理同步选项。
 
-服务端统一运行在 `~/.local/share/myserver/`，使用 `myserver.service`、公共数据库和设备权限。功能在 `server/modules/<name>/` 实现，在 `server/modules/__init__.py` 注册，声明自己的 RPC 路由与权限。公共认证、服务器指标与备份不依赖想法表；系统状态在 `modules` 字段下汇总模块数据。
+服务端统一运行在 `~/.local/share/myserver/`，使用用户级 `myserver.service`、公共数据库和设备权限。功能在 `server/modules/<name>/` 实现，在 `server/modules/__init__.py` 注册，声明自己的 RPC 路由与权限。公共认证、服务器指标与备份不依赖想法表；系统状态在 `modules` 字段下汇总模块数据。
 
 部署参数通过 App 设置、环境变量和 CI secrets 注入，示例见 [Android 配置](android/.env.example) 与 [部署配置](deploy/.env.example)。
 
