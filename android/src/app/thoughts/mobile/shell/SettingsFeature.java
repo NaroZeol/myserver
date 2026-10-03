@@ -25,9 +25,6 @@ public final class SettingsFeature extends Ui implements Feature {
     setting(monitoring, "刷新间隔", MonitorSettings.label(activity), () ->
       MonitorSettings.show(activity, () -> host.redraw())
     );
-    monitoring.addView(
-      text("仅在服务器页可见时自动刷新，离开页面或锁屏后暂停。", 12, MUTED)
-    );
     host.renderFeatureSettings(surface);
     LinearLayout about = card(surface, "关于", "");
     String version = "";
@@ -39,10 +36,6 @@ public final class SettingsFeature extends Ui implements Feature {
     } catch (Exception ignored) {}
     setting(about, "myserver", version, null);
     setting(about, "开源许可", "", () -> showLicenses());
-    space(surface, 32);
-    android.widget.TextView note = text("你的服务器，随身可用。", 12, MUTED);
-    note.setGravity(android.view.Gravity.CENTER);
-    surface.addView(note);
   }
 
   private void showLicenses() {

@@ -25,6 +25,8 @@ public final class TerminalActivity extends Activity {
     FOREGROUND = 0xffe8e6df,
     MUTED = 0xffaaa69f;
   private ServerProfile profile;
+  private TerminalRuntime runtime;
+  private final TerminalRuntime.Observer observer = () -> updateSession();
   private TerminalSurface terminal;
   private volatile TerminalSession connection;
   private TextView feedback, placeholder;
@@ -39,11 +41,17 @@ public final class TerminalActivity extends Activity {
 
   public void onCreate(Bundle state) {
     super.onCreate(state);
-    profile = ServerProfile.load(this);
+    TerminalRuntime existing = TerminalRuntime.current();
+    profile =
+      existing != null && existing.busy
+        ? existing.profile
+        : ServerProfile.load(this);
     if (profile == null) {
       finish();
       return;
     }
+    runtime = TerminalRuntime.obtain(this, profile);
+    profile = runtime.profile;
     internalKeyboard = getSharedPreferences("terminal_ui", 0).getBoolean(
       "internal_keyboard",
       false
@@ -121,7 +129,8 @@ public final class TerminalActivity extends Activity {
     workspace = new LinearLayout(this);
     terminalFrame = new FrameLayout(this);
     FrameLayout frame = terminalFrame;
-    terminal = new TerminalSurface(
+    terminal = runtime.surface;
+    runtime.attach(
       this,
       new TerminalSurface.Listener() {
         public void ready() {
@@ -131,22 +140,12 @@ public final class TerminalActivity extends Activity {
             "TerminalUI.font(" + fontSize + ")",
             null
           );
-          feedback.setText("未连接 · " + profile.address());
+          updateSession();
         }
 
-        public void input(byte[] bytes) {
-          TerminalSession active = connection;
-          if (
-            active != null && active.isConnected() && !active.send(bytes)
-          ) runOnUiThread(() ->
-            feedback.setText("输入未发送，请等待连接恢复后重试")
-          );
-        }
+        public void input(byte[] bytes) {}
 
-        public void resize(int cols, int rows) {
-          TerminalSession active = connection;
-          if (active != null) active.resize(cols, rows);
-        }
+        public void resize(int cols, int rows) {}
 
         public void modifiersChanged(int control, int alt) {
           keys.modifiers(control, alt);
@@ -173,7 +172,8 @@ public final class TerminalActivity extends Activity {
             "终端组件未能加载，请更新 Android System WebView 后重新打开"
           );
         }
-      }
+      },
+      observer
     );
     frame.addView(terminal, new FrameLayout.LayoutParams(-1, -1));
     placeholder = text(
@@ -195,10 +195,6 @@ public final class TerminalActivity extends Activity {
         public void special(String value) {
           sendKey("special", value);
         }
-
-        public void systemInput() {
-          useKeyboard(false, true);
-        }
       }
     );
     virtualKeyboard.setVisibility(View.GONE);
@@ -208,11 +204,10 @@ public final class TerminalActivity extends Activity {
       this,
       new TerminalKeys.Actions() {
         public void key(String name) {
-          if (connection != null && connection.isConnected()) terminal.call(
-            "special",
-            name
-          );
-          else feedback.setText("请先连接服务器");
+          if (connection != null && connection.isConnected()) {
+            if (internalKeyboard) virtualKeyboard.sendSpecial(name);
+            else terminal.call("special", name);
+          } else feedback.setText("请先连接服务器");
         }
 
         public void modifier(String name, boolean lock) {
@@ -234,6 +229,17 @@ public final class TerminalActivity extends Activity {
       }
     });
     setContentView(root);
+    if (terminal.loaded) {
+      connect.setEnabled(true);
+      terminal.keyboardMode(internalKeyboard);
+      terminal.evaluateJavascript(
+        "TerminalUI.font(" +
+          fontSize +
+          "); TerminalUI.resetModifiers(); TerminalUI.clearSelection()",
+        null
+      );
+      updateSession();
+    }
   }
 
   private int dp(int n) {
@@ -378,7 +384,7 @@ public final class TerminalActivity extends Activity {
             (getResources().getDisplayMetrics().widthPixels * 46) / 100,
             -1
           )
-        : new LinearLayout.LayoutParams(-1, dp(192))
+        : new LinearLayout.LayoutParams(-1, dp(208))
     );
     inputModeButton.setText(internalKeyboard ? "内置键盘 ▾" : "系统输入法 ▾");
     inputModeButton.setContentDescription("切换输入方式");
@@ -503,62 +509,51 @@ public final class TerminalActivity extends Activity {
       if (password != null) java.util.Arrays.fill(password, (byte) 0);
       return;
     }
-    terminal.call("newSession", "");
-    busy = true;
-    connect.setText("取消");
-    feedback.setText(
-      enroll ? "正在登录并登记终端密钥…" : "正在连接 " + profile.address()
+    if (
+      android.os.Build.VERSION.SDK_INT >= 33 &&
+      checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+        android.content.pm.PackageManager.PERMISSION_GRANTED &&
+      !getSharedPreferences("terminal_ui", 0).getBoolean(
+        "notification_requested",
+        false
+      )
+    ) {
+      getSharedPreferences("terminal_ui", 0)
+        .edit()
+        .putBoolean("notification_requested", true)
+        .apply();
+      requestPermissions(
+        new String[] { android.Manifest.permission.POST_NOTIFICATIONS },
+        41
+      );
+    }
+    runtime.begin(password, enroll);
+  }
+
+  private void updateSession() {
+    if (isDestroyed() || runtime == null || connect == null) return;
+    connection = runtime.connection;
+    busy = runtime.busy;
+    connect.setText(
+      busy
+        ? connection != null && connection.isConnected()
+          ? "断开"
+          : "取消"
+        : runtime.attempted
+          ? "重连"
+          : "连接"
     );
-    placeholder.setVisibility(android.view.View.GONE);
-    final TerminalSession[] started = new TerminalSession[1];
-    TerminalSession next = new TerminalSession(
-      new TerminalSession.Listener() {
-        public void authorized() {
-          try {
-            ShellIdentity.remember(TerminalActivity.this, profile);
-          } catch (Exception e) {
-            runOnUiThread(() -> feedback.setText(e.getMessage()));
-          }
-        }
-
-        public void connected(boolean registered) {
-          runOnUiThread(() -> {
-            if (isDestroyed() || connection != started[0]) return;
-            connect.setText("断开");
-            feedback.setText("已连接 · " + profile.address());
-          });
-        }
-
-        public void output(byte[] data) throws Exception {
-          terminal.writeBlocking(data);
-        }
-
-        public void ended(String reason) {
-          runOnUiThread(() -> {
-            if (isDestroyed() || connection != started[0]) return;
-            busy = false;
-            keys.stopRepeating();
-            connect.setText("重连");
-            feedback.setText(reason);
-            terminal.evaluateJavascript("TerminalUI.resetModifiers()", null);
-          });
-        }
-      }
-    );
-    started[0] = next;
-    connection = next;
-    next.resize(terminal.columns, terminal.rows);
-    next.start(profile, password, enroll);
+    feedback.setText(runtime.status);
+    placeholder.setVisibility(runtime.attempted ? View.GONE : View.VISIBLE);
+    if (!busy) {
+      if (keys != null) keys.stopRepeating();
+      if (virtualKeyboard != null) virtualKeyboard.stopRepeating();
+    }
   }
 
   private void disconnectPrompt() {
     if (connection == null || !connection.isConnected()) {
-      TerminalSession pending = connection;
-      connection = null;
-      if (pending != null) pending.close();
-      busy = false;
-      connect.setText("连接");
-      feedback.setText("已取消连接");
+      runtime.disconnect("已取消连接");
       return;
     }
     new AlertDialog.Builder(this)
@@ -570,7 +565,7 @@ public final class TerminalActivity extends Activity {
   }
 
   void disconnect() {
-    if (connection != null) connection.close();
+    if (runtime != null) runtime.disconnect("已断开终端");
   }
 
   public void onBackPressed() {
@@ -588,8 +583,9 @@ public final class TerminalActivity extends Activity {
       return;
     }
     new AlertDialog.Builder(this)
-      .setTitle("结束终端并返回？")
-      .setMessage("返回后关闭当前 SSH 会话。")
+      .setTitle("离开终端？")
+      .setMessage("可在后台保持连接，或结束当前会话。")
+      .setNeutralButton("后台运行", (d, w) -> finish())
       .setNegativeButton("留在终端", null)
       .setPositiveButton("结束并返回", (d, w) -> {
         disconnect();
@@ -611,8 +607,9 @@ public final class TerminalActivity extends Activity {
   }
 
   protected void onDestroy() {
-    disconnect();
-    if (terminal != null) terminal.dispose();
+    if (keys != null) keys.stopRepeating();
+    if (virtualKeyboard != null) virtualKeyboard.stopRepeating();
+    if (runtime != null) runtime.detach(observer);
     super.onDestroy();
   }
 
@@ -637,10 +634,7 @@ public final class TerminalActivity extends Activity {
       return;
     }
     if (
-      value.indexOf('\n') >= 0 ||
-      value.indexOf('\r') >= 0 ||
-      value.indexOf('\u001b') >= 0 ||
-      value.indexOf('\t') >= 0
+      value.chars().anyMatch(c -> c < 32 || c == 127)
     ) new AlertDialog.Builder(this)
       .setTitle("粘贴多行或控制字符？")
       .setMessage(
@@ -723,7 +717,7 @@ public final class TerminalActivity extends Activity {
           if (index == 6) new AlertDialog.Builder(this)
             .setTitle("终端操作")
             .setMessage(
-              "点击「内置键盘 / 系统输入法」切换输入方式。内置键盘支持 Shift 与数字符号；需要中文时切回系统输入法。\n\nCtrl / Alt：点击用于下一个按键，长按锁定，再点解除。Ctrl 后按 C 可中断命令。\n\n方向键与翻页键：长按连发。长按 − 输入 |。\n\n音量下键：按住时作为 Ctrl，可在终端选项中关闭。\n\n双指缩放：调整字号。长按文字后拖动两个选区手柄，点击顶部复制；也可通过菜单选择文字。\n\n上滑浏览输出，点击「回到底部」回到提示符。返回时先取消选择或收起键盘，再确认关闭会话。"
+              "点击「内置键盘 / 系统输入法」切换输入方式。Fn 切换 F1–F12 与编辑键，123 / #+= 切换数字符号；需要中文时切回系统输入法。\n\nCtrl / Alt：点击用于下一个按键，长按锁定，再点解除。Ctrl 后按 C 可中断命令。\n\n方向键与翻页键：长按连发。长按 − 输入 |。\n\n音量下键：按住时作为 Ctrl，可在终端选项中关闭。\n\n双指缩放：调整字号。长按文字后拖动两个选区手柄，点击顶部复制；也可通过菜单选择文字。\n\n滑动浏览输出；全屏应用中发送滚轮或方向键，tmux 滚动历史需启用 set -g mouse on。点击「回到底部」回到提示符。返回时先取消选择或收起键盘，再确认关闭会话。"
             )
             .setPositiveButton("知道了", null)
             .show();

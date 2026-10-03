@@ -27,6 +27,11 @@ PY
 if [[ "${MYSERVER_COMPILE_TEST_ONLY:-0}" != 1 ]]; then
   adb install -r build/myserver.apk
   adb install -r build/test/tests.apk
+  apk_package=app.thoughts.mobile
+  [[ "${MYSERVER_PREVIEW:-0}" == 1 ]] && apk_package=app.thoughts.mobile.preview
+  if (( $(adb shell getprop ro.build.version.sdk | tr -d '\r') >= 33 )); then
+    adb shell pm grant "$apk_package" android.permission.POST_NOTIFICATIONS
+  fi
   ssh_args=()
   if [[ "${MYSERVER_SSH_TEST:-0}" == 1 ]]; then
     ssh_args=(-e ssh_host_key "$(cut -d' ' -f2 build/ssh-fixture/host.pub)" -e ssh_wrong_host_key "$(cut -d' ' -f2 build/ssh-fixture/wrong-host.pub)" -e ssh_user "$(id -un)" -e ssh_password "$(cat build/ssh-fixture/password)")

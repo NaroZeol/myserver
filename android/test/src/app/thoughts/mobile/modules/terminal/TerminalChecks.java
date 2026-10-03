@@ -129,6 +129,13 @@ public final class TerminalChecks {
         "terminal"
       );
       field.setAccessible(true);
+      await(() -> {
+        try {
+          return field.get(screen) != null;
+        } catch (Exception e) {
+          return false;
+        }
+      }, "Terminal service must attach its renderer");
       TerminalSurface surface = (TerminalSurface) field.get(screen);
       try {
         await(() -> surface.loaded, "Bundled terminal renderer did not load");
@@ -287,12 +294,14 @@ public final class TerminalChecks {
       picture.recycle();
       TerminalInteractionChecks.run(test, screen, surface, originalRows);
       VirtualKeyboardChecks.run(test, screen, surface, active);
-      test.runOnMainSync(() -> screen.disconnect());
-      await(() -> !active.isConnected(), "Disconnect must close PTY");
-      check(
-        !active.send(new byte[] { 'x' }),
-        "Disconnected input must not be queued for a future session"
+      TmuxGestureChecks.run(test, screen, surface, active);
+      TerminalActivity restored = TerminalLifecycleChecks.run(
+        test,
+        screen,
+        surface,
+        active
       );
+      test.runOnMainSync(restored::finish);
     } finally {
       test.runOnMainSync(screen::finish);
     }

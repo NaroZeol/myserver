@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Ephemeral GitHub runner fixture. No production credentials or Gist writes.
 set -euo pipefail
+if ! command -v tmux >/dev/null; then sudo apt-get update -qq; sudo apt-get install -y tmux; fi
 cd "$(dirname "$0")/.."
 fixture_dir="$HOME/.local/share/myserver"
 mkdir -p "$fixture_dir"/{app,deploy,devices,backups} build/ssh-fixture

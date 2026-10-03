@@ -149,7 +149,6 @@ public final class ServerFeature extends Ui implements Feature {
         host.redraw();
       })
     );
-    surface.addView(text("仅在本页可见时刷新，离开或锁屏后暂停。", 11, MUTED));
     storage = column();
     surface.addView(storage);
     updatePanels();

@@ -28,6 +28,9 @@ final class TerminalSurface extends WebView {
     new ConcurrentHashMap<>();
   private final AtomicInteger serial = new AtomicInteger();
   private volatile boolean disposed;
+  private final android.os.Handler main = new android.os.Handler(
+    android.os.Looper.getMainLooper()
+  );
   private boolean internalKeyboard;
   volatile boolean loaded;
   volatile String rendererIssue = "";
@@ -223,17 +226,19 @@ final class TerminalSurface extends WebView {
     }, 12000);
   }
 
-  void writeBlocking(byte[] bytes) throws InterruptedException {
+  void writeBlocking(byte[] bytes, java.util.function.BooleanSupplier active)
+    throws InterruptedException {
     if (disposed) throw new InterruptedException();
     int id = serial.incrementAndGet();
     CountDownLatch done = new CountDownLatch(1);
     writes.put(id, done);
     String data = Base64.encodeToString(bytes, Base64.NO_WRAP);
-    post(() -> {
-      if (!disposed) evaluateJavascript(
+    main.post(() -> {
+      if (!disposed && active.getAsBoolean()) evaluateJavascript(
         "TerminalUI.write(" + JSONObject.quote(data) + "," + id + ")",
         null
       );
+      else done.countDown();
     });
     try {
       while (!done.await(1, TimeUnit.SECONDS))

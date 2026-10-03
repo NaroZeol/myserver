@@ -2,7 +2,7 @@
 
 [工具集与模块结构](../README.md) · [终端说明](TERMINAL.md) · [服务端](../server/README.md)
 
-Android 8.0+，当前版本 1.9.0。App 不预置服务器地址、用户名或凭据，安装后在服务器首页配置。application ID 为 `app.thoughts.mobile`。
+Android 8.0+，当前版本 1.10.0。App 不预置服务器地址、用户名或凭据，安装后在服务器首页配置。application ID 为 `app.thoughts.mobile`。
 
 ## 构建与安装包
 
@@ -38,7 +38,7 @@ bash android/build.sh
 
 `build.sh` 递归编译 `src/`，`test.sh` 递归编译 `test/src/`。终端测试与终端源码使用相同 Java 包，使会话、渲染器和授权实现继续保持包内可见。`check-boundaries.sh` 单独编译公共层、服务器、终端与设置，不提供想法源码或已编译的想法类，验证模块独立性。
 
-Android 10 / 15 模拟器覆盖离线草稿、同步、服务器身份、设备密钥登记、一次授权后的服务与终端连接、监控刷新调度、真实 SSH PTY、内置键盘/系统输入法切换、旋转、选区复制及布局边界。CI 使用临时服务器和随机密码，不访问生产环境或 Gist。测试产物保存在 `build/test/`。
+Android 10 / 15 模拟器覆盖离线草稿、同步、服务器身份、设备密钥登记、一次授权后的服务与终端连接、监控刷新调度、真实 SSH PTY、内置键盘/Fn/系统输入法切换、tmux 触摸滚动、锁屏/后台、页面重建、旋转、选区复制及布局边界。CI 使用临时服务器和随机密码，不访问生产环境或 Gist。测试产物保存在 `build/test/`。
 
 终端渲染交互测试（开发时安装 Playwright 及 Chromium）：
 
