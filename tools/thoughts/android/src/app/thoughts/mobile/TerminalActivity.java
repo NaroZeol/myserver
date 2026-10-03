@@ -185,8 +185,11 @@ public final class TerminalActivity extends Activity {
     root.addView(keys);
     root.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
       boolean visible = keyboardVisible();
-      keyboardButton.setText(visible ? "收起" : "键盘");
-      keyboardButton.setContentDescription(visible ? "收起键盘" : "显示键盘");
+      String label = visible ? "收起" : "键盘";
+      if (!label.contentEquals(keyboardButton.getText())) {
+        keyboardButton.setText(label);
+        keyboardButton.setContentDescription(visible ? "收起键盘" : "显示键盘");
+      }
     });
     setContentView(root);
   }
