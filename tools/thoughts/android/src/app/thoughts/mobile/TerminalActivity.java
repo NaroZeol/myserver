@@ -188,12 +188,13 @@ public final class TerminalActivity extends Activity {
   }
 
   private void keyboard() {
+    if (!terminal.loaded) return;
     terminal.requestFocus();
-    terminal.call("focus", "");
-    ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).showSoftInput(
-      terminal,
-      InputMethodManager.SHOW_IMPLICIT
-    );
+    terminal.evaluateJavascript("TerminalUI.focus()", result -> {
+      if (!isDestroyed()) (
+        (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)
+      ).showSoftInput(terminal, InputMethodManager.SHOW_IMPLICIT);
+    });
   }
 
   private void login(boolean forcePassword) {

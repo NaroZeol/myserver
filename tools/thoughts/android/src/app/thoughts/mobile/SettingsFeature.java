@@ -22,7 +22,7 @@ final class SettingsFeature extends Ui implements Feature {
     try {
       count = store.entries().size();
     } catch (Exception ignored) {}
-    LinearLayout syncSettings = card(surface, "同步", "");
+    LinearLayout syncSettings = card(surface, "想法同步", "");
     android.widget.Switch automatic = new android.widget.Switch(activity);
     automatic.setText("自动同步");
     automatic.setTextSize(15);
@@ -58,8 +58,7 @@ final class SettingsFeature extends Ui implements Feature {
         .setPositiveButton("关闭", null)
         .show()
     );
-    LinearLayout device = card(surface, "设备", "");
-    setting(device, "清除本机记录与草稿", "", () -> host.disconnect());
+    setting(data, "清除本机记录与草稿", "", () -> host.disconnect());
     LinearLayout about = card(surface, "关于", "");
     setting(about, "想法", "1.5.0", null);
     setting(about, "开源许可", "", () -> showLicenses());

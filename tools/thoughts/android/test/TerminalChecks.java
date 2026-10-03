@@ -231,6 +231,31 @@ final class TerminalChecks {
         picture.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out);
       }
       picture.recycle();
+      int originalRows = Integer.parseInt(js(test, surface, "terminal.rows"));
+      test.runOnMainSync(() ->
+        InteractionChecks.find(
+          screen.getWindow().getDecorView(),
+          "键盘"
+        ).performClick()
+      );
+      await(() -> {
+        try {
+          return (
+            Integer.parseInt(js(test, surface, "terminal.rows")) < originalRows
+          );
+        } catch (Exception e) {
+          return false;
+        }
+      }, "Opening the soft keyboard must keep the terminal visible and resize its PTY");
+      picture = test.getUiAutomation().takeScreenshot();
+      try (
+        java.io.OutputStream out = new java.io.FileOutputStream(
+          new java.io.File(dir, "terminal-keyboard.png")
+        )
+      ) {
+        picture.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out);
+      }
+      picture.recycle();
       test.runOnMainSync(() -> screen.disconnect());
       await(() -> !active.isConnected(), "Disconnect must close PTY");
       check(

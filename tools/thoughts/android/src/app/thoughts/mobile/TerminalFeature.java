@@ -19,12 +19,12 @@ final class TerminalFeature extends Ui implements Feature {
 
   public void render(LinearLayout surface) {
     space(surface, 18);
-    surface.addView(text("SSH", 11, MUTED));
-    space(surface, 20);
-    surface.addView(text("在手机上，\n直接处理服务器。", 27, INK));
+    surface.addView(text("SSH 连接", 11, MUTED));
     space(surface, 20);
     ServerProfile profile = host.api().profile;
     if (profile == null) {
+      surface.addView(text("连接服务器", 24, INK));
+      space(surface, 16);
       surface.addView(
         text("先配置服务器地址与账户，并核对服务器身份。", 14, MUTED)
       );
@@ -41,7 +41,7 @@ final class TerminalFeature extends Ui implements Feature {
       );
       return;
     }
-    surface.addView(text(profile.name, 17, INK));
+    surface.addView(text(profile.name, 24, INK));
     space(surface, 8);
     surface.addView(text(profile.address(), 13, MUTED));
     space(surface, 28);

@@ -367,6 +367,9 @@ public final class MainActivity extends Activity implements Feature.Host {
       try {
         result = Sync.run(store, account, api);
       } catch (Exception e) {
+        if (
+          e instanceof Api.Failure && ((Api.Failure) e).code == 401
+        ) account.clear();
         result = ui.errorMessage(e);
       } finally {
         SYNCING.set(false);

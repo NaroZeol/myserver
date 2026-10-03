@@ -40,7 +40,13 @@ final class ServerFeature extends Ui implements Feature {
       space(surface, 14);
       surface.addView(text("连接你的服务器", 24, INK));
       space(surface, 12);
-      surface.addView(text("配置 SSH 地址与账户，再登记这台设备。", 13, MUTED));
+      surface.addView(
+        text(
+          "配置 SSH 地址与账户；终端可直接登录，想法同步需另行登记。",
+          13,
+          MUTED
+        )
+      );
       space(surface, 24);
       surface.addView(button("配置服务器", () -> configuration(), true));
       return;
@@ -54,7 +60,7 @@ final class ServerFeature extends Ui implements Feature {
     if (!account.isVerified()) {
       surface.addView(
         button(
-          loading ? "正在连接…" : "连接服务器",
+          loading ? "正在连接…" : "连接想法服务",
           () -> passwordEnrollment(),
           true
         )
@@ -62,7 +68,7 @@ final class ServerFeature extends Ui implements Feature {
       space(surface, 12);
       surface.addView(
         text(
-          "首次输入密码，自动登记设备。之后使用手机专属密钥连接。",
+          "登记想法同步权限。服务器需已部署想法服务；终端可独立使用。",
           12,
           MUTED
         )
@@ -71,7 +77,7 @@ final class ServerFeature extends Ui implements Feature {
       setting(surface, "手动登记公钥", "", () -> enrollment());
       setting(surface, "已登记，验证连接", "", () -> verify());
     } else {
-      setting(surface, "设备连接", loading ? "读取中" : "已验证", () ->
+      setting(surface, "想法同步授权", loading ? "读取中" : "已验证", () ->
         verify()
       );
     }
@@ -185,6 +191,9 @@ final class ServerFeature extends Ui implements Feature {
           if (account.can("thoughts")) host.autoSync();
         });
       } catch (Exception e) {
+        if (
+          e instanceof Api.Failure && ((Api.Failure) e).code == 401
+        ) account.clear();
         problem = errorMessage(e);
         runOnUiThread(() -> status(problem));
       } finally {
@@ -215,6 +224,9 @@ final class ServerFeature extends Ui implements Feature {
         readSnapshot();
         problem = "";
       } catch (Exception e) {
+        if (
+          e instanceof Api.Failure && ((Api.Failure) e).code == 401
+        ) account.clear();
         problem = errorMessage(e);
       } finally {
         loading = false;
