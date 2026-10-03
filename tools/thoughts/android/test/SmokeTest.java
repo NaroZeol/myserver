@@ -259,25 +259,55 @@ public final class SmokeTest extends Instrumentation {
       runOnMainSync(() -> {
         screen.status("Feedback survives redraw");
         screen.redraw();
-        View feedback = find(screen.getWindow().getDecorView(), "Feedback survives redraw");
-        check(feedback != null && feedback.getVisibility() == View.VISIBLE, "Redraw must not swallow feedback");
+        View feedback = find(
+          screen.getWindow().getDecorView(),
+          "Feedback survives redraw"
+        );
+        check(
+          feedback != null && feedback.getVisibility() == View.VISIBLE,
+          "Redraw must not swallow feedback"
+        );
         screen.navigate("notes");
-        EditText search = (EditText)find(screen.getWindow().getDecorView(), "搜索想法");
+        EditText search = (EditText) find(
+          screen.getWindow().getDecorView(),
+          "搜索想法"
+        );
         search.setText("Offline");
         screen.navigate("settings");
         screen.navigate("notes");
-        check("Offline".contentEquals(((EditText)find(screen.getWindow().getDecorView(), "搜索想法")).getText()), "Search must survive switching tabs");
+        check(
+          "Offline".contentEquals(
+            (
+              (EditText) find(screen.getWindow().getDecorView(), "搜索想法")
+            ).getText()
+          ),
+          "Search must survive switching tabs"
+        );
         screen.navigate("capture");
-        EditText editor = (EditText)find(screen.getWindow().getDecorView(), "想法内容");
+        EditText editor = (EditText) find(
+          screen.getWindow().getDecorView(),
+          "想法内容"
+        );
         editor.setSelection(3);
         screen.setAutomaticSync(false);
-        check(((EditText)find(screen.getWindow().getDecorView(), "想法内容")).getSelectionStart() == 3, "Changing sync mode must preserve editor cursor");
+        check(
+          (
+            (EditText) find(screen.getWindow().getDecorView(), "想法内容")
+          ).getSelectionStart() == 3,
+          "Changing sync mode must preserve editor cursor"
+        );
       });
       Store.Entry offline = store.entries().get(0);
       store.removeOrRestore(offline, false);
-      check("local-trash".equals(store.entries().get(0).pending), "Offline capture must be removable before first sync");
+      check(
+        "local-trash".equals(store.entries().get(0).pending),
+        "Offline capture must be removable before first sync"
+      );
       store.removeOrRestore(store.entries().get(0), true);
-      check("create".equals(store.entries().get(0).pending), "Restoring local trash must queue a create");
+      check(
+        "create".equals(store.entries().get(0).pending),
+        "Restoring local trash must queue a create"
+      );
       // A local edit while the first request is in flight must survive acknowledgement.
       store.save(
         saved.note.getString("id"),

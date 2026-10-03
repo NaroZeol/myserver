@@ -12,25 +12,45 @@ import java.util.concurrent.TimeUnit;
 
 /** A single PTY; independent of the API worker, with bounded input and back-pressured output. */
 final class TerminalSession {
+
   interface Listener {
     void connected(boolean registered);
     void output(byte[] data) throws Exception;
     void ended(String reason);
   }
+
   private final Listener listener;
-  private final ThreadPoolExecutor writer = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, new ArrayBlockingQueue<>(64));
+  private final ThreadPoolExecutor writer = new ThreadPoolExecutor(
+    1,
+    1,
+    0,
+    TimeUnit.SECONDS,
+    new ArrayBlockingQueue<>(64)
+  );
   private volatile Session session;
   private volatile ChannelShell channel;
   private volatile OutputStream input;
   private volatile boolean closed, connected;
-  private volatile int columns = 80, rows = 24;
+  private volatile int columns = 80,
+    rows = 24;
   private Thread reader;
 
-  TerminalSession(Listener listener) { this.listener = listener; }
-  boolean isConnected() { return connected && !closed; }
+  TerminalSession(Listener listener) {
+    this.listener = listener;
+  }
 
-  synchronized void start(ServerProfile profile, byte[] password, boolean enroll) {
-    if (reader != null) throw new IllegalStateException("Session already started");
+  boolean isConnected() {
+    return connected && !closed;
+  }
+
+  synchronized void start(
+    ServerProfile profile,
+    byte[] password,
+    boolean enroll
+  ) {
+    if (reader != null) throw new IllegalStateException(
+      "Session already started"
+    );
     reader = new Thread(() -> run(profile, password, enroll), "terminal-ssh");
     reader.start();
   }
@@ -40,7 +60,10 @@ final class TerminalSession {
     boolean usedPassword = password != null;
     try {
       if (closed) return;
-      DeviceKey key = !usedPassword || enroll ? new DeviceKey(TerminalAuth.keyId(profile)) : null;
+      DeviceKey key =
+        !usedPassword || enroll
+          ? new DeviceKey(TerminalAuth.keyId(profile))
+          : null;
       Session opened = SshConnection.open(profile, password, key);
       session = opened;
       if (password != null) Arrays.fill(password, (byte) 0);
@@ -63,6 +86,7 @@ final class TerminalSession {
       input = channel.getOutputStream();
       channel.connect(10000);
       if (closed) return;
+      channel.setPtySize(columns, rows, 0, 0);
       connected = true;
       listener.connected(enroll);
       byte[] buffer = new byte[8192];
@@ -70,11 +94,19 @@ final class TerminalSession {
       while (!closed && (count = output.read(buffer)) != -1) {
         if (count > 0) listener.output(Arrays.copyOf(buffer, count));
       }
-      reason = channel.getExitStatus() >= 0 ? "会话已结束 · 退出码 " + channel.getExitStatus() : "连接已断开，可重新连接";
+      reason =
+        channel.getExitStatus() >= 0
+          ? "会话已结束 · 退出码 " + channel.getExitStatus()
+          : "连接已断开，可重新连接";
     } catch (Exception e) {
-      if (!closed) reason = e instanceof JSchException
-        ? SshConnection.failure((JSchException)e, usedPassword).getMessage().replace("本机记录已保留。", "")
-        : (e.getMessage() == null ? "终端连接中断，请重新连接" : e.getMessage());
+      if (!closed) reason =
+        e instanceof JSchException
+          ? SshConnection.failure((JSchException) e, usedPassword)
+              .getMessage()
+              .replace("本机记录已保留。", "")
+          : e.getMessage() == null
+            ? "终端连接中断，请重新连接"
+            : e.getMessage();
     } finally {
       if (password != null) Arrays.fill(password, (byte) 0);
       close();
@@ -85,9 +117,16 @@ final class TerminalSession {
   boolean send(byte[] data) {
     if (!isConnected() || data.length > 65536) return false;
     return enqueue(() -> {
-      try { if (isConnected()) { input.write(data); input.flush(); } }
-      catch (Exception e) { close(); }
-      finally { Arrays.fill(data, (byte)0); }
+      try {
+        if (isConnected()) {
+          input.write(data);
+          input.flush();
+        }
+      } catch (Exception e) {
+        close();
+      } finally {
+        Arrays.fill(data, (byte) 0);
+      }
     });
   }
 
@@ -100,8 +139,12 @@ final class TerminalSession {
   }
 
   private boolean enqueue(Runnable action) {
-    try { writer.execute(action); return true; }
-    catch (java.util.concurrent.RejectedExecutionException e) { return false; }
+    try {
+      writer.execute(action);
+      return true;
+    } catch (java.util.concurrent.RejectedExecutionException e) {
+      return false;
+    }
   }
 
   void close() {

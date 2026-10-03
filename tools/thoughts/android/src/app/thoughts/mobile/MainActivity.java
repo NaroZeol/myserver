@@ -148,7 +148,10 @@ public final class MainActivity extends Activity implements Feature.Host {
         status("更换服务器前，请先同步或导出，并在设置中清除本机记录。");
         return;
       }
-      boolean sameIdentity = api.profile != null && profile.sameEndpoint(api.profile) && profile.knownHost.equals(api.profile.knownHost);
+      boolean sameIdentity =
+        api.profile != null &&
+        profile.sameEndpoint(api.profile) &&
+        profile.knownHost.equals(api.profile.knownHost);
       profile.save(this);
       if (sameIdentity) {
         api = new Api(profile);
@@ -224,7 +227,11 @@ public final class MainActivity extends Activity implements Feature.Host {
     statusView = ui.text(message, 12, Ui.MUTED);
     statusView.setPadding(0, ui.dp(6), 0, ui.dp(6));
     statusView.setMaxLines(2);
-    statusView.setVisibility(android.os.SystemClock.elapsedRealtime() < feedbackUntil ? View.VISIBLE : View.GONE);
+    statusView.setVisibility(
+      android.os.SystemClock.elapsedRealtime() < feedbackUntil
+        ? View.VISIBLE
+        : View.GONE
+    );
     expireStatus(statusView);
     statusView.setAccessibilityLiveRegion(
       View.ACCESSIBILITY_LIVE_REGION_POLITE
@@ -313,9 +320,15 @@ public final class MainActivity extends Activity implements Feature.Host {
 
   private void expireStatus(TextView feedback) {
     long remaining = feedbackUntil - android.os.SystemClock.elapsedRealtime();
-    feedback.postDelayed(() -> {
-      if (feedback == statusView && android.os.SystemClock.elapsedRealtime() >= feedbackUntil) feedback.setVisibility(View.GONE);
-    }, Math.max(1, remaining));
+    feedback.postDelayed(
+      () -> {
+        if (
+          feedback == statusView &&
+          android.os.SystemClock.elapsedRealtime() >= feedbackUntil
+        ) feedback.setVisibility(View.GONE);
+      },
+      Math.max(1, remaining)
+    );
   }
 
   public boolean automaticSync() {
@@ -446,15 +459,32 @@ public final class MainActivity extends Activity implements Feature.Host {
     thoughts.saveDraft();
     int pending = 0;
     try {
-      for (Store.Entry entry : store.entries()) if (entry.pending != null) pending++;
-    } catch (Exception e) { status(ui.errorMessage(e)); return; }
-    boolean hasDraft = !getSharedPreferences("draft", 0).getString("content", "").isEmpty();
+      for (Store.Entry entry : store.entries())
+        if (entry.pending != null) pending++;
+    } catch (Exception e) {
+      status(ui.errorMessage(e));
+      return;
+    }
+    boolean hasDraft = !getSharedPreferences("draft", 0)
+      .getString("content", "")
+      .isEmpty();
     boolean hasUnsaved = pending > 0 || hasDraft;
     LinearLayout form = ui.column();
     form.setPadding(ui.dp(24), ui.dp(8), ui.dp(24), ui.dp(12));
-    form.addView(ui.text(
-      "清除本机记录与草稿，并退出想法同步。服务器数据、连接配置和 SSH 密钥保留。" +
-      (hasUnsaved ? "\n\n当前有 " + pending + " 条未同步记录" + (hasDraft ? "和编辑草稿" : "") + "，清除后无法从本机恢复。可先导出，再回来清除。" : ""), 14, Ui.INK));
+    form.addView(
+      ui.text(
+        "清除本机记录与草稿，并退出想法同步。服务器数据、连接配置和 SSH 密钥保留。" +
+          (hasUnsaved
+            ? "\n\n当前有 " +
+              pending +
+              " 条未同步记录" +
+              (hasDraft ? "和编辑草稿" : "") +
+              "，清除后无法从本机恢复。可先导出，再回来清除。"
+            : ""),
+        14,
+        Ui.INK
+      )
+    );
     CheckBox confirmed = new CheckBox(this);
     confirmed.setText("我确认清除尚未同步的本机内容");
     if (hasUnsaved) form.addView(confirmed);
@@ -462,10 +492,13 @@ public final class MainActivity extends Activity implements Feature.Host {
       .setTitle("清除本机数据？")
       .setView(form)
       .setNegativeButton("取消", null)
-      .setNeutralButton("先导出", (d,w) -> export(false))
-      .setPositiveButton("清除", (d,w) -> {
+      .setNeutralButton("先导出", (d, w) -> export(false))
+      .setPositiveButton("清除", (d, w) -> {
         // Recheck after the confirmation dialog: automatic sync may have started meanwhile.
-        if (SYNCING.get()) { status("正在同步，请完成后再清除"); return; }
+        if (SYNCING.get()) {
+          status("正在同步，请完成后再清除");
+          return;
+        }
         try {
           thoughts.discardDraft();
           store.clear();
@@ -474,11 +507,16 @@ public final class MainActivity extends Activity implements Feature.Host {
           features.put("server", new ServerFeature(this));
           redraw();
           status("本机数据已清除，服务器数据保留");
-        } catch (Exception e) { status(ui.errorMessage(e)); }
-      }).create();
+        } catch (Exception e) {
+          status(ui.errorMessage(e));
+        }
+      })
+      .create();
     dialog.setOnShowListener(d -> {
       dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(!hasUnsaved);
-      confirmed.setOnCheckedChangeListener((b,checked) -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(checked));
+      confirmed.setOnCheckedChangeListener((b, checked) ->
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(checked)
+      );
     });
     dialog.show();
   }

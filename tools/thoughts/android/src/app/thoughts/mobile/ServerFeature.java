@@ -306,9 +306,15 @@ final class ServerFeature extends Ui implements Feature {
                 loading = false;
                 if (dialog.isShowing()) {
                   dialog.setCancelable(true);
-                  dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);
-                  dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);
-                  dialog.getButton(AlertDialog.BUTTON_POSITIVE).setText("校验服务器");
+                  dialog
+                    .getButton(AlertDialog.BUTTON_NEGATIVE)
+                    .setEnabled(true);
+                  dialog
+                    .getButton(AlertDialog.BUTTON_POSITIVE)
+                    .setEnabled(true);
+                  dialog
+                    .getButton(AlertDialog.BUTTON_POSITIVE)
+                    .setText("校验服务器");
                 }
               });
             }

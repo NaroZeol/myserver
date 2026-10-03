@@ -135,8 +135,16 @@ final class Store extends SQLiteOpenHelper {
       "这条想法已变更，请重新打开"
     );
     if ("create".equals(old.pending) || "local-trash".equals(old.pending)) {
-      old.note.put("deleted_at", restore ? JSONObject.NULL : Instant.now().toString());
-      write(old.note, restore ? "create" : "local-trash", null, old.revision + 1);
+      old.note.put(
+        "deleted_at",
+        restore ? JSONObject.NULL : Instant.now().toString()
+      );
+      write(
+        old.note,
+        restore ? "create" : "local-trash",
+        null,
+        old.revision + 1
+      );
       return;
     }
     if (old.pending != null) throw new Exception(
@@ -162,7 +170,11 @@ final class Store extends SQLiteOpenHelper {
       current.note.put("version", response.getInt("version"));
       write(
         current.note,
-        "create".equals(current.pending) ? "update" : "local-trash".equals(current.pending) ? "delete" : current.pending,
+        "create".equals(current.pending)
+          ? "update"
+          : "local-trash".equals(current.pending)
+            ? "delete"
+            : current.pending,
         null,
         current.revision + 1
       );

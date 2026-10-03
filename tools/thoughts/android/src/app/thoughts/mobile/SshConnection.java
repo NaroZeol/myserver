@@ -12,7 +12,11 @@ final class SshConnection {
     return open(profile, password, password == null ? new DeviceKey() : null);
   }
 
-  static Session open(ServerProfile profile, byte[] password, com.jcraft.jsch.Identity identity) throws Exception {
+  static Session open(
+    ServerProfile profile,
+    byte[] password,
+    com.jcraft.jsch.Identity identity
+  ) throws Exception {
     JSch ssh = new JSch();
     ssh.setKnownHosts(
       new ByteArrayInputStream(

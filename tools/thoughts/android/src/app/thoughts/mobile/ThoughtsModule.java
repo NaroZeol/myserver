@@ -19,7 +19,8 @@ final class ThoughtsModule extends Ui {
   private LinearLayout surface, feed;
   private EditText content, tags, search;
   private String editingId = null,
-    filter = "all", query = "";
+    filter = "all",
+    query = "";
   private int editingVersion = 0;
   private boolean restoring = false;
   private final Handler handler = new Handler(Looper.getMainLooper());
@@ -164,7 +165,10 @@ final class ThoughtsModule extends Ui {
       new android.text.InputFilter.LengthFilter(20000),
     });
     content.setText(drafts.getString("content", ""));
-    int cursor = Math.max(0, Math.min(content.length(), drafts.getInt("cursor", content.length())));
+    int cursor = Math.max(
+      0,
+      Math.min(content.length(), drafts.getInt("cursor", content.length()))
+    );
     content.setSelection(cursor);
     content.setContentDescription("想法内容");
     surface.addView(content, new LinearLayout.LayoutParams(-1, -2));
@@ -225,9 +229,13 @@ final class ThoughtsModule extends Ui {
 
   void discardDraft() {
     handler.removeCallbacks(persistDraft);
-    content = null; tags = null;
-    editingId = null; editingVersion = 0;
-    if (!drafts.edit().clear().commit()) throw new IllegalStateException("草稿清除失败");
+    content = null;
+    tags = null;
+    editingId = null;
+    editingVersion = 0;
+    if (!drafts.edit().clear().commit()) throw new IllegalStateException(
+      "草稿清除失败"
+    );
   }
 
   private void saveNote() {
@@ -251,7 +259,8 @@ final class ThoughtsModule extends Ui {
       tags = null;
       editingId = null;
       editingVersion = 0;
-      if (edited) host.navigate("notes"); else host.redraw();
+      if (edited) host.navigate("notes");
+      else host.redraw();
       status("已保存到手机 · 等待同步");
       host.autoSync();
     } catch (Exception e) {
@@ -303,7 +312,12 @@ final class ThoughtsModule extends Ui {
     space(surface, 10);
     feed = column();
     surface.addView(feed);
-    search.addTextChangedListener(watcher(() -> { query = search.getText().toString(); renderFeed(); }));
+    search.addTextChangedListener(
+      watcher(() -> {
+        query = search.getText().toString();
+        renderFeed();
+      })
+    );
     renderFeed();
   }
 
@@ -327,7 +341,10 @@ final class ThoughtsModule extends Ui {
         JSONObject note = entry.note;
         boolean deleted = !note.isNull("deleted_at");
         if (filter.equals("trash") ? !deleted : deleted) continue;
-        if (filter.equals("pending") && (entry.pending == null || "local-trash".equals(entry.pending))) continue;
+        if (
+          filter.equals("pending") &&
+          (entry.pending == null || "local-trash".equals(entry.pending))
+        ) continue;
         if (filter.equals("conflict") && entry.error == null) continue;
         if (
           !(note.optString("content") + note.optString("tags"))
@@ -528,8 +545,14 @@ final class ThoughtsModule extends Ui {
   }
 
   private void history(Store.Entry entry) {
-    if (entry.note.optInt("version") == 0) { status("这条想法还未提交服务器，暂无编辑历史"); return; }
-    if (!account.isVerified()) { status("连接想法服务后才能查看服务器历史"); return; }
+    if (entry.note.optInt("version") == 0) {
+      status("这条想法还未提交服务器，暂无编辑历史");
+      return;
+    }
+    if (!account.isVerified()) {
+      status("连接想法服务后才能查看服务器历史");
+      return;
+    }
     status("正在读取编辑历史…");
     IO.execute(() -> {
       try {
