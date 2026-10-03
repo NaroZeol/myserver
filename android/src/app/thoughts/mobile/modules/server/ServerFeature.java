@@ -75,7 +75,7 @@ public final class ServerFeature extends ThoughtsUi implements Feature {
     if (!account.isVerified()) {
       surface.addView(
         button(
-          loading ? "正在连接…" : "连接想法服务",
+          loading ? "正在连接…" : "连接 myserver",
           () -> passwordEnrollment(),
           true
         )
@@ -83,7 +83,7 @@ public final class ServerFeature extends ThoughtsUi implements Feature {
       space(surface, 12);
       surface.addView(
         text(
-          "登记想法同步权限。服务器需已部署想法服务；终端可独立使用。",
+          "登记服务访问权限。服务器需已部署 myserver；终端可独立使用。",
           12,
           MUTED
         )
@@ -92,7 +92,7 @@ public final class ServerFeature extends ThoughtsUi implements Feature {
       setting(surface, "手动登记公钥", "", () -> enrollment());
       setting(surface, "已登记，验证连接", "", () -> verify());
     } else {
-      setting(surface, "想法同步授权", loading ? "读取中" : "已验证", () ->
+      setting(surface, "设备授权", loading ? "读取中" : "已验证", () ->
         verify()
       );
     }
@@ -108,14 +108,22 @@ public final class ServerFeature extends ThoughtsUi implements Feature {
       setting(services, "博客发布", "Gist", null);
       setting(services, "备份与存储", "—", null);
     } else {
-      JSONObject counts = snapshot.optJSONObject("records");
+      JSONObject moduleStatus = snapshot.optJSONObject("modules");
+      JSONObject thoughts = moduleStatus == null
+        ? null
+        : moduleStatus.optJSONObject("thoughts");
+      JSONObject counts = thoughts == null
+        ? null
+        : thoughts.optJSONObject("records");
       setting(
         services,
         "公开想法",
         counts == null ? "—" : counts.optInt("active") + " 条",
         null
       );
-      JSONObject publication = snapshot.optJSONObject("publication");
+      JSONObject publication = thoughts == null
+        ? null
+        : thoughts.optJSONObject("publication");
       boolean pending =
         publication != null &&
         publication.optInt("generation") >
@@ -376,12 +384,12 @@ public final class ServerFeature extends ThoughtsUi implements Feature {
           new AlertDialog.Builder(activity)
             .setTitle("登记这台手机")
             .setMessage(
-              "先复制公钥，再在服务器执行：\n\npython3 ~/.local/share/thoughts/deploy/register-device.py\n\n按提示粘贴公钥，完成后点击验证连接。\n\n设备指纹\n" +
+              "先复制公钥，再在服务器执行：\n\npython3 ~/.local/share/myserver/deploy/register-device.py\n\n按提示粘贴公钥，完成后点击验证连接。\n\n设备指纹\n" +
                 fingerprint
             )
             .setPositiveButton("复制公钥", (d, w) -> copy(publicKey))
             .setNeutralButton("复制登记命令", (d, w) ->
-              copy("python3 ~/.local/share/thoughts/deploy/register-device.py")
+              copy("python3 ~/.local/share/myserver/deploy/register-device.py")
             )
             .setNegativeButton("关闭", null)
             .show()

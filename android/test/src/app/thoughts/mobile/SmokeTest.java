@@ -595,7 +595,7 @@ public final class SmokeTest extends Instrumentation {
       transport
         .request("/system", "GET", null)
         .getString("service")
-        .equals("想法"),
+        .equals("myserver"),
       "Read-only server capability must work"
     );
     org.json.JSONObject metrics = transport

@@ -26,7 +26,7 @@ public final class SshTransport implements Transport {
     try {
       session = SshConnection.open(profile, null, DeviceEnrollment.key());
       channel = (ChannelExec) session.openChannel("exec");
-      channel.setCommand("thoughts-rpc-v1");
+      channel.setCommand("myserver-rpc-v1");
       channel.setPty(false);
       channel.setAgentForwarding(false);
       byte[] payload = (
@@ -59,7 +59,7 @@ public final class SshTransport implements Transport {
       } catch (Exception e) {
         throw new ConnectionFailure(
           503,
-          "服务器连接已建立，但想法服务未就绪，请检查设备登记"
+          "服务器连接已建立，但 myserver 服务未就绪，请检查设备登记"
         );
       }
       int status = response.getInt("status");

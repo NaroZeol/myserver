@@ -28,7 +28,7 @@ public final class DeviceEnrollment {
       Arrays.fill(password, (byte) 0);
       channel = (ChannelExec) session.openChannel("exec");
       channel.setCommand(
-        "python3 \"$HOME/.local/share/thoughts/deploy/register-device.py\" --name Android --key-file /dev/stdin"
+        "python3 \"$HOME/.local/share/myserver/deploy/register-device.py\" --name Android --key-file /dev/stdin"
       );
       channel.setPty(false);
       channel.setAgentForwarding(false);

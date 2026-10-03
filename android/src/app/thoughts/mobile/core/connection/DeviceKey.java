@@ -62,7 +62,7 @@ public final class DeviceKey implements Identity {
     return (
       "ssh-rsa " +
       Base64.encodeToString(publicBlob, Base64.NO_WRAP) +
-      " thoughts-phone"
+      " myserver-phone"
     );
   }
 

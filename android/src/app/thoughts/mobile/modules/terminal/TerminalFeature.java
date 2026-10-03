@@ -68,7 +68,7 @@ public final class TerminalFeature extends Ui implements Feature {
     surface.addView(text("独立登录", 15, INK));
     space(surface, 8);
     surface.addView(
-      text("使用服务器密码，或登记终端专用密钥。无需安装想法服务。", 13, MUTED)
+      text("使用服务器密码，或登记终端专用密钥。无需安装配套服务端。", 13, MUTED)
     );
   }
 }

@@ -1,50 +1,40 @@
 # myserver
 
-轻量 Android 服务器工具集。公共层提供服务器配置、主机身份核验、SSH 与设备密钥；想法、终端和服务概览是独立的功能入口。
+轻量 Android 服务器工具集，提供 SSH 终端、服务器状态和公开想法管理。App 与配套服务端在同一仓库维护，服务器地址、账户与凭据由使用者配置。
 
 ```text
 myserver/
-├── android/                  # App、公共能力、各功能模块、测试和构建
-│   ├── src/app/thoughts/mobile/
-│   │   ├── MainActivity.java # 应用组装、导航与生命周期入口
-│   │   ├── core/             # 通用界面、Feature 契约、SSH 与连接配置
-│   │   ├── shell/            # 应用级设置
-│   │   └── modules/
-│   │       ├── thoughts/     # 记录、草稿、数据库、同步与受限 RPC
-│   │       ├── terminal/     # SSH 终端、输入、选区与渲染
-│   │       └── server/       # 服务概览及当前服务的连接入口
-│   ├── assets/terminal/      # 随 App 离线打包的终端资源
-│   └── test/                # 按 Java 包组织的原生测试与渲染测试
-└── modules/
-    └── thoughts/
-        ├── server/          # 想法 API、SQLite、Gist 发布与 Web 管理
-        └── deploy/          # 此模块的部署、授权、备份与 systemd 文件
+├── android/                    # 原生 App、公共能力与功能模块
+│   └── src/app/thoughts/mobile/
+│       ├── core/               # UI、连接配置、主机核验与设备密钥
+│       ├── shell/              # 应用设置
+│       └── modules/            # terminal、server、thoughts
+├── server/
+│   ├── app.py                  # HTTP 入口、登录会话与服务器状态
+│   ├── core.py                 # 数据库与请求授权
+│   ├── ssh_gateway.py          # 受限 SSH RPC 网关
+│   ├── system_metrics.py       # CPU、内存、磁盘与运行时间
+│   ├── modules/thoughts/       # 想法记录、历史与 Gist 发布
+│   └── tests/
+└── deploy/                     # 部署、设备登记、备份与 systemd
 ```
 
-- [App 构建、安装包与开发](android/README.md)
-- [想法模块及服务器部署](modules/thoughts/README.md)
-- [终端操作与实现](android/TERMINAL.md)
+- [App 构建与安装](android/README.md)
+- [服务端部署与维护](server/README.md)
+- [SSH 终端](android/TERMINAL.md)
+- [想法功能](server/modules/thoughts/README.md)
+- [安全边界](SECURITY.md)
 
-本仓库同时维护 Android App、配套服务端、部署脚本与 CI。想法是其中一个模块，终端和后续服务器工具共享连接能力。博客独立维护，只消费 Gist 发布的数据，不依赖本仓库的管理服务。
+## 扩展功能
 
-部署参数通过 App 设置、环境变量和 CI secrets 注入，仓库只保留 [Android 构建示例](android/.env.example) 与 [服务端部署示例](modules/thoughts/deploy/.env.example)。
+Android 公共层 `core/Feature.Host` 提供界面、导航、执行器和连接配置。模块在 `modules/<name>/` 实现 `Feature`，由 `MainActivity` 注册。终端独立使用 SSH shell；编译检查验证公共层和终端不依赖想法源码。当前服务页与想法同步共享受限 RPC 的设备身份，应用设置通过 `ThoughtsHost` 管理同步选项。
 
-App 的默认安装包为 `android/build/server-kit.apk`。安装与构建见 [Android 文档](android/README.md)，想法功能的配套部署见 [模块文档](modules/thoughts/README.md)。
+服务端统一运行在 `~/.local/share/myserver/`，使用 `myserver.service`、公共数据库和设备权限。功能在 `server/modules/<name>/` 实现，在 `server/modules/__init__.py` 注册，声明自己的 RPC 路由与权限。公共认证、服务器指标与备份不依赖想法表；系统状态在 `modules` 字段下汇总模块数据。
 
-## 模块边界
+部署参数通过 App 设置、环境变量和 CI secrets 注入，示例见 [Android 配置](android/.env.example) 与 [部署配置](deploy/.env.example)。
 
-`core/Feature.Host` 只提供界面、导航、执行器和服务器配置，公共 UI 与 SSH 不依赖想法数据库。想法专用接口放在 `modules/thoughts/ThoughtsHost`，受限 RPC 密钥由想法模块显式提供；终端只依赖公共能力，独立编译检查会防止它反向依赖想法。
+## 验证与发布
 
-`MainActivity` 负责组装已安装模块，并协调现有想法的同步、导出和本机数据操作。服务概览显示 CPU 使用率、1/5/15 分钟负载、内存、服务所在磁盘与运行时间；进入页面读取一次，也可手动刷新，无后台轮询。当前复用想法后端的 `system.read` 能力，应用设置也集成想法同步设置；这两处依赖是显式的，不代表已有通用服务器管理 API。
+`android.yml` 按 Android 文件和原生 SSH 测试依赖触发，生成 `myserver.apk`，在 Android 10 / 15 上验证。`server.yml` 按服务端和部署文件触发，验证 API、授权、发布和配置。说明文档不会触发 APK 构建。CI 不连接生产服务器，不自动部署。
 
-新增工具通常在 `android/src/app/thoughts/mobile/modules/<name>/` 实现 `Feature`，在应用入口注册。需要配套服务时，再在 `modules/<name>/` 放该模块的后端和部署工具。模块使用自己的数据与授权标识，共享连接核验和非导出设备密钥能力。原生项目保持直接编译，不增加框架或 Gradle 模块依赖。
-
-## 兼容与 CI
-
-Android application ID `app.thoughts.mobile`、主入口组件和数据格式保持稳定。1.7.1 起使用全新的通用签名证书；旧证书版本需要先同步或导出本机内容，再卸载重装并重新登记设备，详见 [签名说明](android/SIGNING.md)。服务器的想法服务运行目录、协议和 systemd 单元属于该模块，继续兼容现有部署。
-
-`.github/workflows/server-kit-android.yml` 仅响应 Android 源码、资源、构建/测试脚本和 SSH 集成测试依赖；说明文档、博客和无关服务文件不会触发 App 构建。想法后端由 `thoughts-server.yml` 单独验证。博客的构建、页面与读取测试由博客仓库负责。
-
-[迁移说明](docs/repository-migration.md)记录历史来源与兼容边界。
-
-[发布前安全审查](docs/security-review.md)记录检查范围、隐私处理和授权边界。
+博客等读取端只消费 Gist 中已发布的想法，不请求管理服务。

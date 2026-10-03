@@ -1,13 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
-# Compatibility with existing local/CI signing configurations.
-export SERVER_KIT_KEYSTORE="${SERVER_KIT_KEYSTORE:-${THOUGHTS_KEYSTORE:-}}"
-export SERVER_KIT_KEYSTORE_PASSWORD_FILE="${SERVER_KIT_KEYSTORE_PASSWORD_FILE:-${THOUGHTS_KEYSTORE_PASSWORD_FILE:-}}"
-export SERVER_KIT_KEY_ALIAS="${SERVER_KIT_KEY_ALIAS:-myserver}"
-export SERVER_KIT_PREVIEW="${SERVER_KIT_PREVIEW:-${THOUGHTS_PREVIEW:-}}"
-export SERVER_KIT_COMPILE_TEST_ONLY="${SERVER_KIT_COMPILE_TEST_ONLY:-${THOUGHTS_COMPILE_TEST_ONLY:-}}"
-export SERVER_KIT_SSH_TEST="${SERVER_KIT_SSH_TEST:-${THOUGHTS_SSH_TEST:-}}"
+export MYSERVER_KEY_ALIAS="${MYSERVER_KEY_ALIAS:-myserver}"
 export PATH="$JAVA_HOME/bin:$PATH"
 rm -rf build/test/classes build/test/dex
 mkdir -p build/test/classes build/test/dex
@@ -15,7 +9,7 @@ python3 - <<'PY'
 from pathlib import Path
 import os
 s=Path('test/AndroidManifest.xml').read_text()
-if os.environ.get('SERVER_KIT_PREVIEW')=='1':
+if os.environ.get('MYSERVER_PREVIEW')=='1':
     s=s.replace('android:targetPackage="app.thoughts.mobile"','android:targetPackage="app.thoughts.mobile.preview"')
 Path('build/test/AndroidManifest.xml').write_text(s)
 PY
@@ -29,17 +23,17 @@ from zipfile import ZipFile, ZIP_DEFLATED
 with ZipFile('build/test/unsigned.apk','a',ZIP_DEFLATED) as f:f.write('build/test/dex/classes.dex','classes.dex')
 PY
 "$ANDROID_BUILD_TOOLS/zipalign" -f -p 4 build/test/unsigned.apk build/test/aligned.apk
-"$ANDROID_BUILD_TOOLS/apksigner" sign --ks "$SERVER_KIT_KEYSTORE" --ks-key-alias "$SERVER_KIT_KEY_ALIAS" --ks-pass "file:$SERVER_KIT_KEYSTORE_PASSWORD_FILE" --out build/test/tests.apk build/test/aligned.apk
-if [[ "${SERVER_KIT_COMPILE_TEST_ONLY:-0}" != 1 ]]; then
-  adb install -r build/server-kit.apk
+"$ANDROID_BUILD_TOOLS/apksigner" sign --ks "$MYSERVER_KEYSTORE" --ks-key-alias "$MYSERVER_KEY_ALIAS" --ks-pass "file:$MYSERVER_KEYSTORE_PASSWORD_FILE" --out build/test/tests.apk build/test/aligned.apk
+if [[ "${MYSERVER_COMPILE_TEST_ONLY:-0}" != 1 ]]; then
+  adb install -r build/myserver.apk
   adb install -r build/test/tests.apk
   ssh_args=()
-  if [[ "${SERVER_KIT_SSH_TEST:-0}" == 1 ]]; then
+  if [[ "${MYSERVER_SSH_TEST:-0}" == 1 ]]; then
     ssh_args=(-e ssh_host_key "$(cut -d' ' -f2 build/ssh-fixture/host.pub)" -e ssh_wrong_host_key "$(cut -d' ' -f2 build/ssh-fixture/wrong-host.pub)" -e ssh_user "$(id -un)" -e ssh_password "$(cat build/ssh-fixture/password)")
   fi
   adb shell am instrument -w "${ssh_args[@]}" app.thoughts.mobile.test/app.thoughts.mobile.SmokeTest | tee build/test/result.txt
   apk_package=app.thoughts.mobile
-  [[ "${SERVER_KIT_PREVIEW:-0}" == 1 ]] && apk_package=app.thoughts.mobile.preview
+  [[ "${MYSERVER_PREVIEW:-0}" == 1 ]] && apk_package=app.thoughts.mobile.preview
   if grep -q 'PASS: native launch' build/test/result.txt; then
     adb shell am instrument -w -e mode visual -e suffix -standard app.thoughts.mobile.test/app.thoughts.mobile.SmokeTest | tee build/test/visual.txt
     adb shell wm size 640x1280

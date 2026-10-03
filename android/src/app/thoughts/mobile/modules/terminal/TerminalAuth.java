@@ -65,14 +65,14 @@ final class TerminalAuth {
       "root.mkdir(mode=0o700,exist_ok=True)\n" +
       "with contextlib.ExitStack() as stack:\n" +
       " locks=[root/'terminal-registration.lock']\n" +
-      " devices=pathlib.Path.home()/'.local/share/thoughts/devices'\n" +
+      " devices=pathlib.Path.home()/'.local/share/myserver/devices'\n" +
       " if devices.is_dir(): locks.append(devices/'register.lock')\n" +
       " for path in locks:\n" +
       "  lock=stack.enter_context(path.open('a')); os.chmod(path,0o600); fcntl.flock(lock,fcntl.LOCK_EX)\n" +
       " p=root/'authorized_keys'\n" +
       " old=p.read_text() if p.exists() else ''\n" +
-      " line='no-agent-forwarding,no-port-forwarding,no-X11-forwarding '+parts[0]+' '+parts[1]+' thoughts-terminal'\n" +
-      " if line not in old.splitlines():\n" +
+      " line='no-agent-forwarding,no-port-forwarding,no-X11-forwarding '+parts[0]+' '+parts[1]+' myserver-terminal'\n" +
+      " if not any(existing.split()[:3]==line.split()[:3] for existing in old.splitlines()):\n" +
       "  with p.open('a') as out:\n" +
       "   os.chmod(p,0o600)\n" +
       "   out.write(('\\n' if old and not old.endswith('\\n') else '')+line+'\\n')\n" +
