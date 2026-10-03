@@ -63,7 +63,7 @@ public final class SettingsFeature extends ThoughtsUi implements Feature {
     );
     setting(data, "清除本机记录与草稿", "", () -> host.disconnect());
     LinearLayout about = card(surface, "关于", "");
-    setting(about, "想法", "1.6.1", null);
+    setting(about, "想法", "1.7.0", null);
     setting(about, "开源许可", "", () -> showLicenses());
     space(surface, 32);
     android.widget.TextView note = text("一些想法，一点记录。", 12, MUTED);

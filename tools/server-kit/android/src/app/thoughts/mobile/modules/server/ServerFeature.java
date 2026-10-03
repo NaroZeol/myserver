@@ -62,6 +62,13 @@ public final class ServerFeature extends ThoughtsUi implements Feature {
     surface.addView(text(profile.name, 28, INK));
     space(surface, 8);
     surface.addView(text(profile.address(), 13, MUTED));
+    new SystemOverview(host).render(
+      surface,
+      snapshot == null ? null : snapshot.optJSONObject("metrics"),
+      checkedAt,
+      account.isVerified() && account.can("system.read"),
+      loading
+    );
     space(surface, 26);
     setting(surface, "连接配置", "修改", () -> configuration());
     space(surface, 16);
@@ -171,6 +178,26 @@ public final class ServerFeature extends ThoughtsUi implements Feature {
     }
   }
 
+  public String headerAction() {
+    return account.isVerified() && account.can("system.read")
+      ? loading
+        ? "刷新中"
+        : "刷新"
+      : "";
+  }
+
+  public String headerIcon() {
+    return "sync";
+  }
+
+  public void performHeaderAction() {
+    refresh();
+  }
+
+  public void enter() {
+    refresh();
+  }
+
   private String date(String value) {
     try {
       return java.time.OffsetDateTime.parse(value)
@@ -227,6 +254,7 @@ public final class ServerFeature extends ThoughtsUi implements Feature {
   public void refresh() {
     if (loading || !account.isVerified() || !account.can("system.read")) return;
     loading = true;
+    host.redraw();
     IO.execute(() -> {
       try {
         readSnapshot();

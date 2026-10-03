@@ -28,6 +28,8 @@ public interface Feature {
 
   default void renderFooter(LinearLayout footer) {}
 
+  default void enter() {}
+
   default void leave() {}
 
   default void refresh() {}

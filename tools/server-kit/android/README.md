@@ -2,7 +2,7 @@
 
 [工具集与模块结构](../README.md) · [终端说明](TERMINAL.md) · [想法服务](../modules/thoughts/README.md)
 
-Android 8.0+，当前版本 1.6.1。App 不预置服务器地址、用户名或凭据，安装后在服务页配置。application ID 为 `app.thoughts.mobile`，保留以兼容已有安装、数据库和 Android Keystore。
+Android 8.0+，当前版本 1.7.0。App 不预置服务器地址、用户名或凭据，安装后在服务页配置。application ID 为 `app.thoughts.mobile`，保留以兼容已有安装、数据库和 Android Keystore。
 
 ## 构建与安装包
 

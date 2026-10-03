@@ -62,3 +62,7 @@ python3 -m venv .venv
 本地 Web 管理可用 `THOUGHTS_DEV=1 THOUGHTS_ORIGIN=http://127.0.0.1:8765` 启动 Gunicorn；开发时将 `THOUGHTS_DATABASE` 指向测试数据库。恢复备份前停止 API 和发布定时器，另存数据库及 WAL，恢复服务用户所有权和 `0600` 权限，再启动服务。
 
 本模块保留 `thoughts.service`、`~/.local/share/thoughts/`、`thoughts-rpc-v1` 与 `THOUGHTS_*` 服务端环境变量，以兼容已有部署。仓库移动无需迁移线上数据库、设备授权或 Gist 配置。`deploy/stage.sh` 只上传本模块的服务端与部署文件，Android 安装包通过 App 构建产物分发。
+
+## 服务器状态
+
+已授权 `system.read` 的设备可通过 `/api/system` 获取 CPU 短时使用率、1/5/15 分钟负载、内存、服务所在磁盘和运行时间。新增 `metrics` 字段不改变原有响应或权限；旧 App 可继续使用。读取只使用 Python 标准库和 Linux `/proc`，不运行 shell 命令、不安装采集代理，读取失败的指标返回空值。CPU 使用率为约 200ms 的采样，负载是等待运行/不可中断任务的平均数量，不是百分比；内存使用量按 `MemTotal - MemAvailable` 计算。参见 [Linux /proc 文档](https://docs.kernel.org/filesystems/proc.html)。

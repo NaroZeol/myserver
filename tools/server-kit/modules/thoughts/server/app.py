@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
 
+from system_metrics import snapshot as host_snapshot
+
 from flask import Flask, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -175,7 +177,8 @@ def create_app(config=None):
         counts = db().execute("SELECT COUNT(*) AS total, SUM(deleted_at IS NOT NULL) AS trash FROM thoughts").fetchone()
         publication = dict(db().execute("SELECT * FROM publication WHERE id=1").fetchone())
         return jsonify(
-            protocol_version=1, service="想法", version="1.2.0",
+            protocol_version=1, service="想法", version="1.3.0",
+            metrics=host_snapshot(root),
             capabilities=["thoughts", "system.read"],
             records={"active": counts["total"] - (counts["trash"] or 0), "trash": counts["trash"] or 0},
             publication=publication,

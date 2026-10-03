@@ -88,6 +88,15 @@ public final class SmokeTest extends Instrumentation {
           .edit()
           .clear()
           .commit();
+        getTargetContext()
+          .getSharedPreferences("server_status", 0)
+          .edit()
+          .putString(
+            "snapshot",
+            "{\"metrics\":{\"cpu\":{\"cores\":2,\"usage_percent\":7.5,\"load_average\":[0.12,0.08,0.04]},\"memory\":{\"used_bytes\":751619276,\"total_bytes\":2147483648,\"usage_percent\":35},\"disk\":{\"used_bytes\":23622320128,\"total_bytes\":42949672960,\"usage_percent\":55},\"uptime_seconds\":90061}}"
+          )
+          .putLong("checked_at", System.currentTimeMillis() - 60000)
+          .commit();
         Store sample = new Store(getTargetContext());
         sample.clear();
         sample.save(
@@ -588,6 +597,15 @@ public final class SmokeTest extends Instrumentation {
         .getString("service")
         .equals("想法"),
       "Read-only server capability must work"
+    );
+    org.json.JSONObject metrics = transport
+      .request("/system", "GET", null)
+      .getJSONObject("metrics");
+    check(
+      metrics.getJSONObject("cpu").getInt("cores") > 0 &&
+        metrics.getJSONObject("memory").getLong("total_bytes") > 0 &&
+        metrics.getJSONObject("disk").getLong("total_bytes") > 0,
+      "Real SSH snapshot must include CPU, memory and disk metrics"
     );
     boolean rejected = false;
     try {

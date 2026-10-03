@@ -73,6 +73,7 @@ public final class MainActivity extends Activity implements ThoughtsHost {
     }
     redraw();
     thoughts.receiveShare(getIntent());
+    active.enter();
   }
 
   private void add(Feature feature) {
@@ -201,6 +202,7 @@ public final class MainActivity extends Activity implements ThoughtsHost {
     ).hideSoftInputFromWindow(getWindow().getDecorView().getWindowToken(), 0);
     current = id;
     redraw();
+    active.enter();
   }
 
   public void redraw() {

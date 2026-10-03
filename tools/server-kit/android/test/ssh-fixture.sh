@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 fixture_dir="$HOME/.local/share/thoughts"
 mkdir -p "$fixture_dir"/{app,deploy,devices,backups} build/ssh-fixture
 chmod 700 "$fixture_dir"
-cp ../modules/thoughts/server/{app.py,publisher.py,ssh_gateway.py} "$fixture_dir/app/"
+cp ../modules/thoughts/server/{app.py,publisher.py,ssh_gateway.py,system_metrics.py} "$fixture_dir/app/"
 cp ../modules/thoughts/deploy/{register-device.py,ssh-gateway.sh} "$fixture_dir/deploy/"
 chmod 700 "$fixture_dir/deploy/ssh-gateway.sh"
 python3 -m pip install -q --target build/ssh-fixture/python -r ../modules/thoughts/server/requirements.txt
