@@ -21,11 +21,12 @@ App 不预置任何服务器、用户名、主机公钥或 Gist ID。首次在�
 使用 SSH config 中自行配置的别名，或 `user@host`：
 
 ```sh
-bash modules/thoughts/deploy/stage.sh my-server
-ssh -t my-server 'bash ~/.local/share/thoughts/deploy/activate.sh'
+export MYSERVER_SSH_TARGET=my-server
+bash modules/thoughts/deploy/stage.sh
+ssh -t "$MYSERVER_SSH_TARGET" 'bash ~/.local/share/thoughts/deploy/activate.sh'
 ```
 
-上传脚本不含个人配置或凭据。激活脚本交互配置 Gist ID、文件名与 token，并通过 sudo 为当前非 root 用户生成 systemd 服务。运行账户、主目录和属组在安装时读取，不写死在仓库。App 的 SSH 用户应为部署服务的同一账户。
+上传脚本优先使用命令行指定的 SSH 目标，否则读取 `MYSERVER_SSH_TARGET`。可将本机值放入被 Git 忽略的 `.env`，示例见 [deploy/.env.example](deploy/.env.example)；脚本不会自动读取 `.env`，也不会把它上传到服务器。激活脚本交互配置 Gist ID、文件名与 token，并通过 sudo 为当前非 root 用户生成 systemd 服务。运行账户、主目录和属组在安装时读取，不写死在仓库。App 的 SSH 用户应为部署服务的同一账户。
 
 本地配置保存在服务器 `~/.local/share/thoughts/`：
 
@@ -34,6 +35,18 @@ ssh -t my-server 'bash ~/.local/share/thoughts/deploy/activate.sh'
 - `thoughts.sqlite`：记录、历史、会话与发布队列。
 - `devices/`：已登记设备和权限。
 - `backups/`：每日 SQLite online backup，保留 30 天。
+
+部署自动化也可在**服务器上**通过环境变量注入配置，避免修改脚本或交互输入：
+
+```sh
+export THOUGHTS_GIST_ID=your_gist_id
+export THOUGHTS_GIST_FILE=thoughts.json
+export THOUGHTS_GIST_TOKEN_FILE=/path/to/private/github-token
+python3 ~/.local/share/thoughts/deploy/configure-gist.py --non-interactive
+bash ~/.local/share/thoughts/deploy/activate.sh
+```
+
+将示例值换成自己的配置。Token 文件由受保护的本机文件或密钥管理工具提供，不把 token 放进命令行、`.env` 示例或源码。配置工具仍验证 token 的 Gist 权限和所有权，然后写入服务端私有配置；验证失败不替换原配置。`--non-interactive` 缺少必需值时直接报错，不会等待输入；未提供 Gist ID 或文件名时可复用已有目标。普通运行仍支持交互输入。环境变量不会从部署电脑自动传递到远端，也不会自动进入 systemd 服务；上述配置步骤会将已验证的值保存供服务使用。
 
 配置文件权限为 `0600`，不进入 Git。也可通过 `THOUGHTS_GIST_ID` / `THOUGHTS_GIST_FILE` 指定发布目标，通过 `THOUGHTS_GIST_CONFIG` 指定配置文件。博客的 Gist raw URL 由博客自身配置，App 不持有 GitHub 凭据。
 

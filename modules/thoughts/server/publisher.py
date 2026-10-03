@@ -10,17 +10,17 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 def gist_target():
-    path = Path(os.environ.get("THOUGHTS_GIST_CONFIG", str(Path.home() / ".local/share/thoughts/gist.json")))
+    path = Path(os.environ.get("THOUGHTS_GIST_CONFIG", "").strip() or str(Path.home() / ".local/share/thoughts/gist.json"))
     config = json.loads(path.read_text()) if path.is_file() else {}
-    ident = os.environ.get("THOUGHTS_GIST_ID", config.get("id", ""))
-    filename = os.environ.get("THOUGHTS_GIST_FILE", config.get("file", "thoughts.json"))
+    ident = os.environ.get("THOUGHTS_GIST_ID", "").strip() or config.get("id", "")
+    filename = os.environ.get("THOUGHTS_GIST_FILE", "").strip() or config.get("file", "thoughts.json")
     if not re.fullmatch(r"[0-9a-fA-F]{5,64}", ident) or not isinstance(filename, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", filename):
         raise RuntimeError("请先配置服务器的 Gist ID 与文件名")
     return ident, filename
 
 
 def github_write(content):
-    token_file = Path(os.environ.get("THOUGHTS_GIST_TOKEN_FILE", str(Path.home() / ".local/share/thoughts/gist-token")))
+    token_file = Path(os.environ.get("THOUGHTS_GIST_TOKEN_FILE", "").strip() or str(Path.home() / ".local/share/thoughts/gist-token"))
     if not token_file.is_file():
         raise RuntimeError("尚未配置服务器的 Gist 写入凭据")
     token = token_file.read_text().strip()

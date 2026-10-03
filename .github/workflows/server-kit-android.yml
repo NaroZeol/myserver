@@ -42,6 +42,8 @@ jobs:
   android:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
+    env:
+      SERVER_KIT_KEY_ALIAS: ${{ vars.SERVER_KIT_KEY_ALIAS || 'thoughts' }}
     strategy:
       fail-fast: false
       matrix:
@@ -78,7 +80,7 @@ jobs:
             echo 'APK_KIND=release' >> "$GITHUB_ENV"
           else
             printf '%s' 'android-ci-only' > "$RUNNER_TEMP/signing-password"
-            keytool -genkeypair -keystore "$RUNNER_TEMP/thoughts.jks" -storepass:file "$RUNNER_TEMP/signing-password" -alias thoughts -keyalg RSA -keysize 3072 -validity 30 -dname 'CN=Thoughts CI Preview'
+            keytool -genkeypair -keystore "$RUNNER_TEMP/thoughts.jks" -storepass:file "$RUNNER_TEMP/signing-password" -alias "$SERVER_KIT_KEY_ALIAS" -keyalg RSA -keysize 3072 -validity 30 -dname 'CN=myserver CI Preview'
             echo 'APK_KIND=preview' >> "$GITHUB_ENV"
             echo 'SERVER_KIT_PREVIEW=1' >> "$GITHUB_ENV"
           fi

@@ -14,13 +14,25 @@ export ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar"
 export ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
 export SERVER_KIT_KEYSTORE=/path/to/private/signing.jks
 export SERVER_KIT_KEYSTORE_PASSWORD_FILE=/path/to/private/signing-password
+export SERVER_KIT_KEY_ALIAS=thoughts
 bash android/build.sh
 bash android/check-boundaries.sh
 ```
 
-安装包：`android/build/server-kit.apk`。签名别名仍为 `thoughts`；使用原签名即可覆盖更新。构建目录已被 Git 忽略，私钥和密码文件不进入仓库。构建仍接受旧的 `THOUGHTS_KEYSTORE` / `THOUGHTS_KEYSTORE_PASSWORD_FILE` 环境变量。
+安装包：`android/build/server-kit.apk`。签名别名由 `SERVER_KIT_KEY_ALIAS` 注入，默认 `thoughts` 以兼容已有密钥；使用原签名即可覆盖更新。构建目录已被 Git 忽略，私钥和密码文件不进入仓库。构建仍接受旧的 `THOUGHTS_KEYSTORE` / `THOUGHTS_KEYSTORE_PASSWORD_FILE` 环境变量。
 
-GitHub Actions 推荐 secrets `SERVER_KIT_KEYSTORE_BASE64` 和 `SERVER_KIT_KEYSTORE_PASSWORD`，也兼容已有 `THOUGHTS_KEYSTORE_BASE64` / `THOUGHTS_KEYSTORE_PASSWORD`。仅主线构建可以读取正式签名；其他分支、PR 或未配置 secrets 时生成 `.preview` 包，不能覆盖正式版；artifact 名为 `server-kit-android-<release|preview>-api<29|35>`。
+GitHub Actions 推荐 secrets `SERVER_KIT_KEYSTORE_BASE64` 和 `SERVER_KIT_KEYSTORE_PASSWORD`，也兼容已有 `THOUGHTS_KEYSTORE_BASE64` / `THOUGHTS_KEYSTORE_PASSWORD`。自有 keystore 使用其他别名时，设置仓库 Actions variable `SERVER_KIT_KEY_ALIAS`，无需修改工作流。仅主线构建可以读取正式签名；其他分支、PR 或未配置 secrets 时生成 `.preview` 包，不能覆盖正式版；artifact 名为 `server-kit-android-<release|preview>-api<29|35>`。
+
+本机参数可参考 [.env.example](.env.example)，复制到 `android/.env` 并填写后，显式加载：
+
+```sh
+set -a
+. ./android/.env
+set +a
+bash android/build.sh
+```
+
+`.env` 不提交；脚本不会自动读取或执行它。私钥和密码仍使用受保护文件或 CI secrets。已有签名证书的作者标识属于证书本身，环境变量不能改变它；更换证书会影响覆盖安装兼容性。
 
 ## 验证
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 module_dir="$(cd "$(dirname "$0")/.." && pwd)"
-server_target="${1:?Usage: stage.sh SSH_TARGET (SSH config alias or user@host)}"
+server_target="${1:-${MYSERVER_SSH_TARGET:-}}"
+: "${server_target:?Pass SSH_TARGET or set MYSERVER_SSH_TARGET (SSH config alias or user@host)}"
 [[ "$server_target" != -* ]] || { echo 'Invalid SSH target.' >&2; exit 1; }
 ssh "$server_target" 'mkdir -p ~/.local/share/thoughts/{app,deploy,artifacts,backups,devices}; chmod 700 ~/.local/share/thoughts'
 tar -C "$module_dir/server" -cf - app.py ssh_gateway.py publisher.py system_metrics.py requirements.txt static | ssh "$server_target" 'tar -xf - -C ~/.local/share/thoughts/app'

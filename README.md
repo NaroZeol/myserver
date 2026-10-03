@@ -27,6 +27,8 @@ myserver/
 
 本仓库同时维护 Android App、配套服务端、部署脚本与 CI。想法是其中一个模块，终端和后续服务器工具共享连接能力。博客独立维护，只消费 Gist 发布的数据，不依赖本仓库的管理服务。
 
+部署参数通过 App 设置、环境变量和 CI secrets 注入，仓库只保留 [Android 构建示例](android/.env.example) 与 [服务端部署示例](modules/thoughts/deploy/.env.example)。
+
 App 的默认安装包为 `android/build/server-kit.apk`。安装与构建见 [Android 文档](android/README.md)，想法功能的配套部署见 [模块文档](modules/thoughts/README.md)。
 
 ## 模块边界

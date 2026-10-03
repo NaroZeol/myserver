@@ -4,6 +4,7 @@ cd "$(dirname "$0")"
 # Compatibility with existing local/CI signing configurations.
 export SERVER_KIT_KEYSTORE="${SERVER_KIT_KEYSTORE:-${THOUGHTS_KEYSTORE:-}}"
 export SERVER_KIT_KEYSTORE_PASSWORD_FILE="${SERVER_KIT_KEYSTORE_PASSWORD_FILE:-${THOUGHTS_KEYSTORE_PASSWORD_FILE:-}}"
+export SERVER_KIT_KEY_ALIAS="${SERVER_KIT_KEY_ALIAS:-thoughts}"
 export SERVER_KIT_PREVIEW="${SERVER_KIT_PREVIEW:-${THOUGHTS_PREVIEW:-}}"
 export SERVER_KIT_COMPILE_TEST_ONLY="${SERVER_KIT_COMPILE_TEST_ONLY:-${THOUGHTS_COMPILE_TEST_ONLY:-}}"
 export SERVER_KIT_SSH_TEST="${SERVER_KIT_SSH_TEST:-${THOUGHTS_SSH_TEST:-}}"
@@ -46,6 +47,6 @@ with ZipFile('build/unsigned.apk', 'a', ZIP_DEFLATED) as apk:
         apk.write(dex, dex.name)
 PY
 "$ANDROID_BUILD_TOOLS/zipalign" -f -p 4 build/unsigned.apk build/aligned.apk
-"$ANDROID_BUILD_TOOLS/apksigner" sign --ks "$SERVER_KIT_KEYSTORE" --ks-key-alias thoughts --ks-pass "file:$SERVER_KIT_KEYSTORE_PASSWORD_FILE" --out build/server-kit.apk build/aligned.apk
+"$ANDROID_BUILD_TOOLS/apksigner" sign --ks "$SERVER_KIT_KEYSTORE" --ks-key-alias "$SERVER_KIT_KEY_ALIAS" --ks-pass "file:$SERVER_KIT_KEYSTORE_PASSWORD_FILE" --out build/server-kit.apk build/aligned.apk
 "$ANDROID_BUILD_TOOLS/apksigner" verify --verbose build/server-kit.apk
 ls -lh build/server-kit.apk
