@@ -1,12 +1,10 @@
 [Unit]
 Description=Publish queued Thoughts to Gist
-After=myserver.service
 
 [Service]
 Type=oneshot
 WorkingDirectory=@DATA_DIR@/app
-Environment=PYTHONPATH=@DATA_DIR@/python
 Environment=MYSERVER_DATABASE=@DATA_DIR@/myserver.sqlite
-ExecStart=/usr/bin/python3 -m modules.thoughts.publisher
+ExecStart=/usr/bin/python3 -S -m modules.thoughts.publisher
 UMask=0077
 NoNewPrivileges=true

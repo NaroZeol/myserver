@@ -122,9 +122,9 @@ def test_staging_uses_injected_target_with_argument_override(tmp_path, arguments
     log = tmp_path / 'targets'
     env = dict(os.environ, PATH=str(tmp_path) + ':' + os.environ['PATH'], MYSERVER_SSH_TARGET='environment-host', STAGING_TARGET_LOG=str(log))
     subprocess.run(['bash', str(DEPLOY / 'stage.sh'), *arguments], cwd=tmp_path, env=env, stdin=subprocess.DEVNULL, check=True, capture_output=True)
-    assert log.read_text().splitlines() == [expected] * 4
+    assert log.read_text().splitlines() == [expected]
     result = subprocess.run(['bash', str(DEPLOY / 'stage.sh')], cwd=tmp_path, env=dict(env, MYSERVER_SSH_TARGET='-oProxyCommand=unexpected'), stdin=subprocess.DEVNULL, capture_output=True)
-    assert result.returncode != 0 and log.read_text().splitlines() == [expected] * 4
+    assert result.returncode != 0 and log.read_text().splitlines() == [expected]
 
 
 def test_interactive_setup_remains_available(injected, monkeypatch):
@@ -160,3 +160,25 @@ def test_blank_environment_entries_do_not_override_saved_publication_settings(tm
     assert len(calls) == 1
     assert calls[0].full_url == 'https://api.github.com/gists/abcde12345'
     assert json.loads(calls[0].data) == {'files': {'saved.json': {'content': '[]'}}}
+
+
+def test_staging_uploads_complete_bundle_without_touching_active_code(tmp_path):
+    home = tmp_path / 'home'
+    root = home / '.local/share/myserver'
+    (root / 'app').mkdir(parents=True)
+    (root / 'app/active-marker').write_text('active')
+    commands = tmp_path / 'bin'
+    commands.mkdir()
+    ssh = commands / 'ssh'
+    ssh.write_text('#!/bin/bash\nexec bash -c "$2"\n')
+    ssh.chmod(0o700)
+    env = dict(os.environ, HOME=str(home), PATH=str(commands) + ':' + os.environ['PATH'])
+    subprocess.run(['bash', str(DEPLOY / 'stage.sh'), 'test-target'], env=env,
+                   check=True, capture_output=True, timeout=10)
+    assert (root / 'app/active-marker').read_text() == 'active'
+    assert (root / 'staged/app/service.py').exists()
+    assert (root / 'staged/deploy/activate.py').exists()
+    assert not (root / 'staged/server').exists()
+    assert not list(root.glob('.stage-*'))
+    assert root.stat().st_mode & 0o777 == 0o700
+    assert (root / 'staged/deploy/ssh-gateway.sh').stat().st_mode & 0o777 == 0o700

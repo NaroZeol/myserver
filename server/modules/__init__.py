@@ -1,4 +1,4 @@
-"""Installed server features and their restricted SSH capabilities."""
+"""Installed server modules and their explicit RPC permissions."""
 from importlib import import_module
 
 ENABLED = ("thoughts",)
@@ -8,18 +8,19 @@ def features():
     return [import_module("modules." + name) for name in ENABLED]
 
 
-def init_app(app):
+def initialize(connection):
     for feature in features():
-        feature.init_app(app)
+        feature.initialize(connection)
 
 
-def status():
-    return {name: import_module("modules." + name).status() for name in ENABLED}
+def status(connection, capabilities):
+    return {name: feature.status(connection) for name, feature in zip(ENABLED, features())
+            if feature.CAPABILITIES & capabilities}
 
 
 def capabilities():
     return {"system.read"}.union(*(feature.CAPABILITIES for feature in features()))
 
 
-def rpc_routes():
-    return [route for feature in features() for route in feature.RPC_ROUTES]
+def routes():
+    return [route for feature in features() for route in feature.routes()]

@@ -1,13 +1,18 @@
 import base64
 import importlib.util
 import json
-import sqlite3
+import fcntl
+import os
+import subprocess
+import sys
 import struct
 from pathlib import Path
 
 import pytest
-from test_api import app
-from ssh_gateway import handle, validate_request
+from database import initialize
+from rpc import RpcError
+from service import handle, prepare
+import ssh_gateway
 
 spec=importlib.util.spec_from_file_location('registration',Path(__file__).parents[2]/'deploy/register-device.py')
 registration=importlib.util.module_from_spec(spec);spec.loader.exec_module(registration)
@@ -44,46 +49,13 @@ def test_do_not_convert_existing_unrestricted_key(tmp_path):
 
 @pytest.mark.parametrize('path,method', [('/login','POST'),('/logout','POST'),('/system','POST'),('http://attacker.test/','GET'),('//attacker.test','GET'),('/thoughts/%2e%2e/system','GET'),('/thoughts\n','GET'),('/app/','GET'),('/../system','GET')])
 def test_gateway_rejects_non_capability_routes(path,method):
-    with pytest.raises((PermissionError,ValueError)):
-        validate_request(dict(path=path,method=method),['thoughts','system.read'])
+    with pytest.raises((RpcError,ValueError)):
+        prepare(dict(path=path,method=method),['thoughts','system.read'],"unused.sqlite")
 
 
-def test_permissions_are_server_side():
-    with pytest.raises(PermissionError):validate_request(dict(path='/system',method='GET',capabilities=['system.read']),['thoughts'])
-    assert validate_request(dict(path='/session',method='GET'),['system.read'])[0]=='/session'
-
-
-def test_gateway_reuses_api_auth_and_cleans_internal_session(app):
-    client=app.test_client()
-    class Response:
-        def __init__(self,result):self.result=result;self.code=result.status_code
-        def __enter__(self):return self
-        def __exit__(self,*args):pass
-        def read(self,limit):return self.result.data
-    class Opener:
-        def open(self,request,timeout):
-            assert request.full_url=='http://127.0.0.1:8765/api/session'
-            assert request.get_header('Authorization').startswith('Bearer ')
-            result=client.get('/api/session',headers={'Authorization':request.get_header('Authorization')})
-            return Response(result)
-    response=handle(dict(path='/session',method='GET'),['thoughts'],app.config['DATABASE'],Opener())
-    assert response==dict(status=200,body=dict(ok=True,capabilities=['thoughts'],transport='ssh',protocol_version=1))
-    with sqlite3.connect(app.config['DATABASE']) as db:assert db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0]==0
-    class Broken:
-        def open(self,*args,**kwargs):raise TimeoutError()
-    with pytest.raises(TimeoutError):handle(dict(path='/session',method='GET'),['thoughts'],app.config['DATABASE'],Broken())
-    with sqlite3.connect(app.config['DATABASE']) as db:assert db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0]==0
-
-
-def test_system_overview_requires_auth_and_omits_secrets(app):
-    client=app.test_client()
-    assert client.get('/api/system').status_code==401
-    result=client.post('/api/login',json={'password':'a-test-password-at-least-16-characters'})
-    response=client.get('/api/system',headers={'Authorization':'Bearer '+result.json['token']})
-    assert response.status_code==200
-    assert response.json['modules']['thoughts']['records']==dict(active=0,trash=0)
-    assert response.json['backup']['latest_at'] is None
-    assert 'password' not in response.get_data(as_text=True) and 'token' not in response.get_data(as_text=True)
+def test_permissions_are_server_side(rpc):
+    assert rpc('/system', capabilities=['thoughts'])['status'] == 403
+    assert rpc('/session', capabilities=['system.read'])['body']['capabilities'] == ['system.read']
 
 
 def test_gist_target_is_deployment_configuration(tmp_path, monkeypatch):
@@ -111,3 +83,102 @@ def test_maintenance_blocks_authority_changes(tmp_path):
         registration.revoke(root,authorized,ident)
     assert authorized.read_bytes()==original
     assert len(list((root/'devices').glob('*.json')))==1
+
+
+@pytest.fixture
+def gateway(tmp_path):
+    root = tmp_path / '.local/share/myserver'
+    ident = registration.enroll(root, tmp_path / '.ssh/authorized_keys', key(), 'test device', ['thoughts', 'system.read'])
+    initialize(root / 'myserver.sqlite')
+    script = Path(__file__).parents[1] / 'ssh_gateway.py'
+    # Every successful operation must work with no site packages and no sockets.
+    runner = '''import sys,runpy
+sys.path.insert(0,sys.argv[1].rsplit('/',1)[0])
+def deny_network(event,args):
+    if event in ('socket.connect','socket.bind'): raise RuntimeError('network forbidden')
+sys.addaudithook(deny_network)
+sys.argv=sys.argv[1:]
+runpy.run_path(sys.argv[0],run_name='__main__')
+'''
+    def call(value=None, raw=None, device=ident, command='myserver-rpc-v1'):
+        env = dict(os.environ, HOME=str(tmp_path), MYSERVER_DATABASE='', SSH_ORIGINAL_COMMAND=command)
+        result = subprocess.run([sys.executable, '-S', '-c', runner, str(script), device],
+                                input=raw if raw is not None else json.dumps(value) + '\n',
+                                text=True, capture_output=True, env=env, check=True, timeout=10)
+        assert result.stderr == ''
+        assert len(result.stdout.splitlines()) == 1
+        return json.loads(result.stdout)
+    return call, root, ident
+
+
+def test_direct_gateway_reads_writes_and_preserves_wire_protocol(gateway):
+    call, root, _ = gateway
+    assert call(dict(path='/session', method='GET')) == dict(status=200, body=dict(ok=True, capabilities=['system.read', 'thoughts'], transport='ssh', protocol_version=1))
+    created = call(dict(path='/thoughts', method='POST', body={'content': '离线重试', 'tags': ['test']}))
+    assert created['status'] == 201
+    assert call(dict(path='/thoughts', method='GET'))['body']['items'] == [created['body']]
+    status = call(dict(path='/system', method='GET'))
+    assert status['status'] == 200
+    assert status['body']['modules']['thoughts']['records'] == dict(active=1, trash=0)
+    assert status['body']['backup']['latest_at'] is None
+    assert not {'password', 'token', 'hostname', 'username'} & status['body'].keys()
+
+
+def test_unregistered_revoked_or_repurposed_device_is_denied(gateway):
+    call, root, ident = gateway
+    request = dict(path='/session', method='GET')
+    assert call(request, device='f' * 64)['status'] == 403
+    assert call(request, device='../invalid')['status'] == 403
+    authorized = root.parents[2] / '.ssh/authorized_keys'
+    original = authorized.read_bytes()
+    authorized.write_text(key() + '\n')
+    assert call(request)['status'] == 403
+    authorized.write_bytes(original)
+    registration.revoke(root, authorized, ident)
+    assert call(request)['status'] == 403
+
+
+def test_device_cannot_inject_capabilities_or_invoke_ungranted_routes(gateway):
+    call, root, ident = gateway
+    path = root / 'devices' / (ident + '.json')
+    record = json.loads(path.read_text())
+    record['capabilities'] = ['system.read']
+    path.write_text(json.dumps(record))
+    for route, method in [('/thoughts','GET'),('/thoughts','POST'),('/export','GET'),('/publish','POST'),('/publication','GET')]:
+        assert call(dict(path=route, method=method, capabilities=['thoughts'], body={'content': 'injection'}))['status'] == 403
+    assert call(dict(path='/session', method='GET'))['body']['capabilities'] == ['system.read']
+
+
+@pytest.mark.parametrize('raw', ['{}', '{}\n', '[]\n', '{broken}\n', '{"path":"/thoughts","method":"POST","body":{"content":NaN}}\n', '{"path":"/thoughts","method":"POST","body":[]}\n', '[' * 1100 + '\n', 'x' * (140 * 1024) + '\n'], ids=['incomplete','empty','array','syntax','constant','body','deep','oversized'])
+def test_malformed_or_oversized_input_cannot_mutate_database(gateway, raw):
+    call, _, _ = gateway
+    assert call(raw=raw)['status'] == 400
+    assert call(dict(path='/thoughts', method='GET'))['body']['items'] == []
+
+
+def test_maintenance_and_exclusive_update_lock_fail_promptly(gateway):
+    call, root, _ = gateway
+    request = dict(path='/session', method='GET')
+    (root / 'maintenance').touch()
+    assert call(request)['status'] == 503
+    (root / 'maintenance').unlink()
+    with (root / 'operations.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        assert call(request)['status'] == 503
+    assert call(request)['status'] == 200
+
+
+def test_missing_database_returns_sanitized_error_without_creating_empty_file(gateway):
+    call, root, _ = gateway
+    (root / 'myserver.sqlite').unlink()
+    result = call(dict(path='/session', method='GET'))
+    assert result['status'] == 503
+    assert str(root) not in json.dumps(result)
+    assert not (root / 'myserver.sqlite').exists()
+
+
+def test_response_bound_counts_encoded_bytes_including_frame(monkeypatch):
+    monkeypatch.setattr(ssh_gateway, 'MAX_RESPONSE', 512)
+    raw = ssh_gateway.encode(dict(status=200, body={'content': '字' * 200}))
+    assert len(raw) <= 512 and raw.endswith(b'\n')
+    assert json.loads(raw)['status'] == 413

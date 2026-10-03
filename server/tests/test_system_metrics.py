@@ -1,7 +1,6 @@
 from pathlib import Path
 from collections import namedtuple
 import pytest
-from test_api import app, owner
 import system_metrics as metrics
 
 
@@ -38,9 +37,9 @@ def test_invalid_counter_intervals_are_not_reported_as_utilization(before, after
     assert metrics.cpu_percent(before, after) is None
 
 
-def test_status_adds_metrics_without_changing_auth_or_existing_fields(app, owner):
-    assert app.test_client().get('/api/system').status_code == 401
-    status = owner.get('/api/system').json
+def test_status_adds_metrics_without_changing_auth_or_existing_fields(rpc):
+    assert rpc('/system', capabilities=[])['status'] == 403
+    status = rpc('/system')['body']
     assert {'metrics', 'modules', 'storage', 'backup'} <= status.keys()
     assert {'cpu', 'memory', 'disk', 'uptime_seconds'} == status['metrics'].keys()
     assert status['metrics']['disk']['total_bytes'] > 0

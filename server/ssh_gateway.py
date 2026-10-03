@@ -1,109 +1,77 @@
-"""One bounded JSON request per restricted SSH exec channel. Never runs client commands."""
-import hashlib
+"""One bounded JSON request per restricted SSH exec channel; no HTTP bridge."""
+import fcntl
 import json
 import os
 import re
-import secrets
 import signal
-import sqlite3
 import sys
-import time
 from pathlib import Path
 from paths import data_root, database_path
-import modules
-from urllib.error import HTTPError
-from urllib.parse import urlsplit
-from urllib.request import Request, build_opener, ProxyHandler
 
 MAX_REQUEST = 140 * 1024
 MAX_RESPONSE = 16 * 1024 * 1024
-# Capabilities are assigned during device registration, never by the phone.
-ROUTES = [(None, {'GET'}, r'/session'), ('system.read', {'GET'}, r'/system')] + modules.rpc_routes()
-
-
-def validate_request(value, capabilities):
-    if not isinstance(value, dict):
-        raise ValueError('请求必须是 JSON 对象')
-    path, method = value.get('path'), value.get('method')
-    if not isinstance(path, str) or len(path) > 2048 or not isinstance(method, str):
-        raise ValueError('请求格式不正确')
-    url = urlsplit(path)
-    if url.scheme or url.netloc or url.fragment or '%' in url.path or '\\' in path or any(ord(c) < 32 for c in path):
-        raise ValueError('请求路径不被允许')
-    for capability, methods, pattern in ROUTES:
-        if method in methods and re.fullmatch(pattern, url.path):
-            if capability and capability not in capabilities:
-                raise PermissionError('这台设备没有此功能的权限')
-            body = value.get('body')
-            if body is not None and not isinstance(body, dict):
-                raise ValueError('请求内容必须是 JSON 对象')
-            return path, method, body
-    raise PermissionError('设备密钥不能执行此操作')
-
-
-def handle(value, capabilities, database, opener=None):
-    path, method, body = validate_request(value, capabilities)
-    token = secrets.token_urlsafe(32)
-    hashed = hashlib.sha256(token.encode()).hexdigest()
-    connection = sqlite3.connect(database, timeout=10)
-    try:
-        with connection:
-            connection.execute('DELETE FROM sessions WHERE expires<?', (time.time(),))
-            connection.execute('INSERT INTO sessions VALUES(?,?)', (hashed, time.time() + 60))
-        data = None if body is None else json.dumps(body).encode()
-        req = Request('http://127.0.0.1:8765/api' + path, data=data, method=method, headers={
-            'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token})
-        opener = opener or build_opener(ProxyHandler({}))
-        try:
-            response = opener.open(req, timeout=30)
-        except HTTPError as error:
-            response = error
-        with response:
-            raw = response.read(MAX_RESPONSE + 1)
-            if len(raw) > MAX_RESPONSE:
-                raise ValueError('响应过大，请在服务器导出备份')
-            result = json.loads(raw)
-            if path == '/session' and response.code == 200:
-                result.update(capabilities=sorted(capabilities), transport='ssh', protocol_version=1)
-            return dict(status=response.code, body=result)
-    finally:
-        with connection:
-            connection.execute('DELETE FROM sessions WHERE token=?', (hashed,))
-        connection.close()
 
 
 def registered_device(root, device_id):
     if not re.fullmatch('[0-9a-f]{64}', device_id):
         raise PermissionError('设备标识无效')
-    record = json.loads((root / 'devices' / (device_id + '.json')).read_text())
-    command = f'restrict,command="{root}/deploy/ssh-gateway.sh {device_id}" '
-    authorized = Path.home() / '.ssh/authorized_keys'
-    if not any(line.startswith(command + record['public_key'] + ' ') for line in authorized.read_text().splitlines()):
-        raise PermissionError('设备已被撤销')
-    return record
+    try:
+        record = json.loads((root / 'devices' / (device_id + '.json')).read_text())
+        command = f'restrict,command="{root}/deploy/ssh-gateway.sh {device_id}" '
+        authorized = Path.home() / '.ssh/authorized_keys'
+        if not any(line.startswith(command + record['public_key'] + ' ') for line in authorized.read_text().splitlines()):
+            raise PermissionError('设备已被撤销')
+        return record
+    except FileNotFoundError:
+        raise PermissionError('设备未登记或已被撤销') from None
+
+
+def reject_constant(_value):
+    raise ValueError('JSON 常量无效')
+
+
+def process(device_id, stream):
+    root = data_root()
+    if (root / 'maintenance').exists():
+        raise RuntimeError('Service maintenance')
+    with (root / 'operations.lock').open('a') as lock:
+        # Updates take the exclusive lock; do not keep a phone waiting during deployment.
+        fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        if (root / 'maintenance').exists():
+            raise RuntimeError('Service maintenance')
+        record = registered_device(root, device_id)
+        raw = stream.readline(MAX_REQUEST + 1)
+        if len(raw) > MAX_REQUEST or not raw.endswith(b'\n'):
+            raise ValueError('请求过大或不完整')
+        value = json.loads(raw, parse_constant=reject_constant)
+        # Import the business code only while the running bundle is protected.
+        from service import handle
+        return handle(value, record['capabilities'], database_path())
+
+
+def encode(result):
+    raw = (json.dumps(result, ensure_ascii=False, separators=(',', ':'), allow_nan=False) + '\n').encode('utf-8')
+    if len(raw) > MAX_RESPONSE:
+        return encode(dict(status=413, body=dict(error='响应过大，请缩小查询范围或在服务器导出备份')))
+    return raw
 
 
 def main():
+    os.umask(0o077)
     signal.alarm(45)
     try:
         if os.environ.get('SSH_ORIGINAL_COMMAND') != 'myserver-rpc-v1' or len(sys.argv) != 2:
             raise PermissionError('此密钥仅能用于 myserver App')
-        root = data_root()
-        if (root / "maintenance").exists():
-            raise RuntimeError("Service maintenance")
-        record = registered_device(root, sys.argv[1])
-        raw = sys.stdin.buffer.readline(MAX_REQUEST + 1)
-        if len(raw) > MAX_REQUEST or not raw.endswith(b'\n'):
-            raise ValueError('请求过大或不完整')
-        result = handle(json.loads(raw), record['capabilities'], database_path())
+        result = process(sys.argv[1], sys.stdin.buffer)
+        output = encode(result)
     except PermissionError as error:
-        result = dict(status=403, body=dict(error=str(error)))
-    except (ValueError, json.JSONDecodeError):
-        result = dict(status=400, body=dict(error='请求无效'))
+        output = encode(dict(status=403, body=dict(error=str(error))))
+    except (ValueError, UnicodeError, RecursionError):
+        output = encode(dict(status=400, body=dict(error='请求无效')))
     except Exception:
-        result = dict(status=503, body=dict(error='服务暂时不可用，本地记录已保留'))
-    sys.stdout.write(json.dumps(result, ensure_ascii=False, separators=(',', ':')) + '\n')
-    sys.stdout.flush()
+        output = encode(dict(status=503, body=dict(error='服务暂时不可用，本地记录已保留')))
+    sys.stdout.buffer.write(output)
+    sys.stdout.buffer.flush()
 
 
 if __name__ == '__main__':

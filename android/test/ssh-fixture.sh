@@ -5,11 +5,11 @@ cd "$(dirname "$0")/.."
 fixture_dir="$HOME/.local/share/myserver"
 mkdir -p "$fixture_dir"/{app,deploy,devices,backups} build/ssh-fixture
 chmod 700 "$fixture_dir"
-tar -C ../server --exclude=__pycache__ --exclude=tests --exclude=README.md -cf - app.py core.py paths.py ssh_gateway.py system_metrics.py modules | tar -xf - -C "$fixture_dir/app"
+tar -C ../server --exclude=__pycache__ --exclude=tests --exclude=README.md -cf - cli.py database.py rpc.py service.py paths.py ssh_gateway.py system_metrics.py modules | tar -xf - -C "$fixture_dir/app"
 cp ../deploy/{register-device.py,ssh-gateway.sh} "$fixture_dir/deploy/"
 chmod 700 "$fixture_dir/deploy/ssh-gateway.sh"
-python3 -m pip install -q --target build/ssh-fixture/python -r ../server/requirements.txt
-PYTHONPATH="$PWD/build/ssh-fixture/python" python3 -m gunicorn --chdir "$fixture_dir/app" --bind 127.0.0.1:8765 'app:create_app()' > build/ssh-fixture/api.log 2>&1 &
+python3 -S "$fixture_dir/app/cli.py" init
+python3 -S "$fixture_dir/app/cli.py" check
 for name in host wrong-host; do ssh-keygen -q -t ecdsa -b 256 -N '' -f "build/ssh-fixture/$name"; done
 # A random password exists only on this disposable runner for the enrollment test.
 python3 - <<'PYTEST'
@@ -39,4 +39,3 @@ sudo mkdir -p /run/sshd
 sudo /usr/sbin/sshd -f "$PWD/build/ssh-fixture/sshd_config" -E "$PWD/build/ssh-fixture/sshd.log"
 sudo chmod 644 "$PWD/build/ssh-fixture/sshd.log"
 sudo passwd -S "$(id -un)"
-curl --fail --silent --retry 5 --retry-connrefused http://127.0.0.1:8765/api/health
