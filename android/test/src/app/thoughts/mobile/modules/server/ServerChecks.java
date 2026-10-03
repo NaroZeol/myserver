@@ -80,5 +80,77 @@ public final class ServerChecks {
         "Missing metrics must not render as zero"
       );
     });
+    if (
+      screen.api().profile != null && screen.account().can("system.read")
+    ) liveMonitoring(test, screen);
+  }
+
+  private static void liveMonitoring(Instrumentation test, MainActivity screen)
+    throws Exception {
+    android.content.SharedPreferences preferences = screen.getSharedPreferences(
+      "monitor_settings",
+      0
+    );
+    android.content.SharedPreferences snapshots = screen.getSharedPreferences(
+      "server_status",
+      0
+    );
+    int previous = MonitorSettings.seconds(screen);
+    try {
+      preferences.edit().putInt("seconds", 2).commit();
+      long before = snapshots.getLong("checked_at", 0);
+      test.runOnMainSync(() -> screen.navigate("server"));
+      app.thoughts.mobile.modules.terminal.TerminalChecks.await(
+        () -> snapshots.getLong("checked_at", 0) > before,
+        "Entering the server workspace must fetch fresh metrics"
+      );
+      long first = snapshots.getLong("checked_at", 0);
+      app.thoughts.mobile.modules.terminal.TerminalChecks.await(
+        () -> snapshots.getLong("checked_at", 0) > first,
+        "Visible monitoring must refresh at the selected interval"
+      );
+      test.waitForIdleSync();
+      android.graphics.Bitmap picture = test.getUiAutomation().takeScreenshot();
+      java.io.File directory = new java.io.File(
+        test.getTargetContext().getExternalFilesDir(null),
+        "screenshots"
+      );
+      directory.mkdirs();
+      try (
+        java.io.OutputStream out = new java.io.FileOutputStream(
+          new java.io.File(directory, "server-connected.png")
+        )
+      ) {
+        picture.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out);
+      }
+      picture.recycle();
+      test.runOnMainSync(() -> screen.navigate("thoughts"));
+      screen
+        .executor()
+        .submit(() -> {})
+        .get(45, java.util.concurrent.TimeUnit.SECONDS);
+      test.waitForIdleSync();
+      long stopped = snapshots.getLong("checked_at", 0);
+      Thread.sleep(2500);
+      check(
+        snapshots.getLong("checked_at", 0) == stopped,
+        "Leaving the server page must stop automatic SSH requests"
+      );
+      preferences.edit().putInt("seconds", 0).commit();
+      test.runOnMainSync(() -> screen.navigate("server"));
+      app.thoughts.mobile.modules.terminal.TerminalChecks.await(
+        () -> snapshots.getLong("checked_at", 0) > stopped,
+        "Manual mode must load the initial status"
+      );
+      long manual = snapshots.getLong("checked_at", 0);
+      Thread.sleep(2500);
+      check(
+        snapshots.getLong("checked_at", 0) == manual,
+        "Manual mode must not continue automatic refresh"
+      );
+    } finally {
+      test.runOnMainSync(() -> screen.navigate("thoughts"));
+      preferences.edit().putInt("seconds", previous).commit();
+    }
   }
 }

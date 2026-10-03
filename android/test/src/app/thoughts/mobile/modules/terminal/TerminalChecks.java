@@ -20,8 +20,10 @@ public final class TerminalChecks {
     if (!pass) throw new AssertionError(reason);
   }
 
-  static void await(java.util.function.BooleanSupplier condition, String reason)
-    throws Exception {
+  public static void await(
+    java.util.function.BooleanSupplier condition,
+    String reason
+  ) throws Exception {
     long until = System.nanoTime() + 30_000_000_000L;
     while (!condition.getAsBoolean() && System.nanoTime() < until)
       Thread.sleep(50);

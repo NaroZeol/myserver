@@ -2,6 +2,7 @@ package app.thoughts.mobile.modules.terminal;
 
 import android.app.Instrumentation;
 import android.content.ClipboardManager;
+import android.content.ClipData;
 import android.content.Context;
 import android.os.SystemClock;
 import android.view.MotionEvent;
@@ -144,18 +145,22 @@ final class TerminalInteractionChecks {
       InteractionChecks.find(root, "复制").performClick()
     );
     test.waitForIdleSync();
-    Thread.sleep(150);
-    test.runOnMainSync(() -> {
-      ClipboardManager clipboard = (ClipboardManager) screen.getSystemService(
-        Context.CLIPBOARD_SERVICE
-      );
-      TerminalChecks.check(
-        "copy_me".contentEquals(
-          clipboard.getPrimaryClip().getItemAt(0).getText()
-        ),
-        "Copy must use selected text"
-      );
-    });
+    java.util.concurrent.atomic.AtomicReference<String> copied =
+      new java.util.concurrent.atomic.AtomicReference<>("");
+    TerminalChecks.await(() -> {
+      test.runOnMainSync(() -> {
+        ClipboardManager clipboard = (ClipboardManager) screen.getSystemService(
+          Context.CLIPBOARD_SERVICE
+        );
+        ClipData data = clipboard.getPrimaryClip();
+        copied.set(
+          data == null || data.getItemCount() == 0
+            ? ""
+            : String.valueOf(data.getItemAt(0).getText())
+        );
+      });
+      return "copy_me".equals(copied.get());
+    }, "Copy callback must publish the selected text to the clipboard");
     TerminalChecks.js(test, surface, "TerminalUI.selectVisible()");
     test.runOnMainSync(screen::onBackPressed);
     Thread.sleep(100);

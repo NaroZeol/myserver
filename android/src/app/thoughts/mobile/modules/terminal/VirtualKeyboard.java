@@ -56,7 +56,7 @@ final class VirtualKeyboard extends LinearLayout {
         letter('m'),
         "⌫",
       });
-      row(new String[] { "123", "输入法", "/", "-", "空格", ",", ".", "↵" });
+      row(new String[] { "123", "系统", "/", "-", "空格", ",", ".", "↵" });
     }
   }
 
@@ -164,7 +164,7 @@ final class VirtualKeyboard extends LinearLayout {
       render();
       return;
     }
-    if (label.equals("输入法")) {
+    if (label.equals("系统")) {
       actions.systemInput();
       return;
     }
