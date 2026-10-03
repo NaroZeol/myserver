@@ -247,6 +247,19 @@ final class TerminalChecks {
           return false;
         }
       }, "Opening the soft keyboard must keep the terminal visible and resize its PTY");
+      await(() -> {
+        try {
+          return "true".equals(
+            js(
+              test,
+              surface,
+              "terminal.buffer.active.baseY + terminal.buffer.active.cursorY < terminal.buffer.active.viewportY + terminal.rows"
+            )
+          );
+        } catch (Exception e) {
+          return false;
+        }
+      }, "The current prompt must stay visible above the keyboard, not hidden below old scrollback");
       picture = test.getUiAutomation().takeScreenshot();
       try (
         java.io.OutputStream out = new java.io.FileOutputStream(

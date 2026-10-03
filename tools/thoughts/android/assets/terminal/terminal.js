@@ -26,7 +26,12 @@
   terminal.onData(send);
   terminal.onBinary(data => Phone.input(btoa(data)));
   terminal.onResize(size => Phone.resize(size.cols, size.rows));
-  function resize() { if (document.body.clientHeight > 0) fit.fit(); }
+  function resize() {
+    if (document.body.clientHeight <= 0) return;
+    fit.fit();
+    // Keep the active prompt visible when the IME or rotation changes the viewport.
+    requestAnimationFrame(() => terminal.scrollToBottom());
+  }
   window.addEventListener('resize', resize);
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe(document.body);
   window.TerminalUI = {
@@ -38,7 +43,7 @@
     key(text) { send(text); terminal.focus(); },
     paste(text) { terminal.paste(text); terminal.focus(); },
     control(enabled) { control = enabled; terminal.focus(); },
-    focus() { terminal.focus(); },
+    focus() { terminal.scrollToBottom(); terminal.focus(); },
     selection() { return terminal.getSelection(); },
     clear() { terminal.clear(); },
     font(size) { terminal.options.fontSize = size; resize(); }
