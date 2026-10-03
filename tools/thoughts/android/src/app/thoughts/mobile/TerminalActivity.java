@@ -322,6 +322,15 @@ public final class TerminalActivity extends Activity {
   }
 
   private void disconnectPrompt() {
+    if (connection == null || !connection.isConnected()) {
+      TerminalSession pending = connection;
+      connection = null;
+      if (pending != null) pending.close();
+      busy = false;
+      connect.setText("连接");
+      feedback.setText("已取消连接");
+      return;
+    }
     new AlertDialog.Builder(this)
       .setTitle("断开终端？")
       .setMessage("当前 shell 会话将关闭，依附会话运行的命令可能中止。")
@@ -335,7 +344,8 @@ public final class TerminalActivity extends Activity {
   }
 
   public void onBackPressed() {
-    if (!busy) {
+    if (!busy || connection == null || !connection.isConnected()) {
+      disconnect();
       super.onBackPressed();
       return;
     }

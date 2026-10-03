@@ -72,6 +72,7 @@ final class TerminalSession {
         TerminalAuth.register(opened, key);
         opened.disconnect();
         if (closed) return;
+        usedPassword = false;
         session = opened = SshConnection.open(profile, null, key);
       }
       if (closed) return;
@@ -99,14 +100,19 @@ final class TerminalSession {
           ? "会话已结束 · 退出码 " + channel.getExitStatus()
           : "连接已断开，可重新连接";
     } catch (Exception e) {
-      if (!closed) reason =
-        e instanceof JSchException
-          ? SshConnection.failure((JSchException) e, usedPassword)
-              .getMessage()
-              .replace("本机记录已保留。", "")
-          : e.getMessage() == null
-            ? "终端连接中断，请重新连接"
-            : e.getMessage();
+      if (!closed) {
+        if (e instanceof JSchException) {
+          Api.Failure failure = SshConnection.failure(
+            (JSchException) e,
+            usedPassword
+          );
+          reason =
+            failure.code == 401 && !usedPassword
+              ? "终端密钥未获授权，请在「更多」中使用密码连接。"
+              : failure.getMessage().replace("本机记录已保留。", "");
+        } else reason =
+          e.getMessage() == null ? "终端连接中断，请重新连接" : e.getMessage();
+      }
     } finally {
       if (password != null) Arrays.fill(password, (byte) 0);
       close();
