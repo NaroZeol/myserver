@@ -11,6 +11,8 @@ import java.nio.charset.StandardCharsets;
 final class TerminalLifecycleChecks {
 
   private static String keyguardDismissResult = "";
+  private static String notificationTouch =
+    "No visible notification title found";
 
   static TerminalActivity run(
     Instrumentation test,
@@ -90,6 +92,15 @@ final class TerminalLifecycleChecks {
       connection.isConnected(),
       "Background SSH must stay connected"
     );
+    android.accessibilityservice.AccessibilityServiceInfo accessibility = test
+      .getUiAutomation()
+      .getServiceInfo();
+    int originalAccessibilityFlags = accessibility.flags;
+    accessibility.flags |=
+      android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS |
+      android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS |
+      android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS;
+    test.getUiAutomation().setServiceInfo(accessibility);
     try {
       TerminalChecks.check(
         test
@@ -112,6 +123,9 @@ final class TerminalLifecycleChecks {
     } catch (Exception | AssertionError failure) {
       diagnoseNotification(test, screen);
       throw failure;
+    } finally {
+      accessibility.flags = originalAccessibilityFlags;
+      test.getUiAutomation().setServiceInfo(accessibility);
     }
     waitLine(test, surface, "BACKGROUND_OUTPUT_READY");
 
@@ -198,6 +212,9 @@ final class TerminalLifecycleChecks {
         .getSystemService(android.app.KeyguardManager.class);
       detail
         .append("Notification return diagnostic\n")
+        .append("touch=")
+        .append(notificationTouch)
+        .append('\n')
         .append("dismiss-keyguard output: ")
         .append(keyguardDismissResult)
         .append("\n")
@@ -347,24 +364,90 @@ final class TerminalLifecycleChecks {
   }
 
   private static boolean tapNotification(Instrumentation test) {
-    android.view.accessibility.AccessibilityNodeInfo root = test
+    // The active root can remain the launcher behind the shade. Inspect visible system windows.
+    for (android.view.accessibility.AccessibilityWindowInfo window : test
       .getUiAutomation()
-      .getRootInActiveWindow();
-    if (root == null) return false;
-    for (android.view.accessibility.AccessibilityNodeInfo item : root.findAccessibilityNodeInfosByText(
-      "终端会话运行中"
-    )) {
-      android.view.accessibility.AccessibilityNodeInfo target = item;
-      while (target != null && !target.isClickable())
-        target = target.getParent();
+      .getWindows()) {
       if (
-        target != null &&
-        target.performAction(
-          android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK
-        )
-      ) return true;
+        window.getType() !=
+        android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM
+      ) continue;
+      android.graphics.Rect title = notificationTitle(window.getRoot(), 0);
+      if (title == null || title.isEmpty()) continue;
+      android.graphics.Rect bounds = new android.graphics.Rect();
+      window.getBoundsInScreen(bounds);
+      if (!bounds.contains(title.centerX(), title.centerY())) continue;
+      long time = android.os.SystemClock.uptimeMillis();
+      boolean down = touch(
+        test,
+        time,
+        time,
+        android.view.MotionEvent.ACTION_DOWN,
+        title.centerX(),
+        title.centerY()
+      );
+      android.os.SystemClock.sleep(60);
+      boolean up = touch(
+        test,
+        time,
+        android.os.SystemClock.uptimeMillis(),
+        android.view.MotionEvent.ACTION_UP,
+        title.centerX(),
+        title.centerY()
+      );
+      notificationTouch = "title=" + title + " down=" + down + " up=" + up;
+      return down && up;
     }
     return false;
+  }
+
+  private static android.graphics.Rect notificationTitle(
+    android.view.accessibility.AccessibilityNodeInfo node,
+    int depth
+  ) {
+    if (node == null || depth > 40) return null;
+    if (
+      node.isVisibleToUser() &&
+      "终端会话运行中".contentEquals(
+        node.getText() == null ? "" : node.getText()
+      )
+    ) {
+      android.graphics.Rect bounds = new android.graphics.Rect();
+      node.getBoundsInScreen(bounds);
+      return bounds;
+    }
+    for (int i = 0; i < node.getChildCount(); i++) {
+      android.graphics.Rect found = notificationTitle(
+        node.getChild(i),
+        depth + 1
+      );
+      if (found != null) return found;
+    }
+    return null;
+  }
+
+  private static boolean touch(
+    Instrumentation test,
+    long downTime,
+    long eventTime,
+    int action,
+    int x,
+    int y
+  ) {
+    android.view.MotionEvent event = android.view.MotionEvent.obtain(
+      downTime,
+      eventTime,
+      action,
+      x,
+      y,
+      0
+    );
+    event.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
+    try {
+      return test.getUiAutomation().injectInputEvent(event, true);
+    } finally {
+      event.recycle();
+    }
   }
 
   private static StatusBarNotification notification(Instrumentation test) {
