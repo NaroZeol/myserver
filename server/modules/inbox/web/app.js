@@ -14,6 +14,182 @@ let pickedItems = new Set(),
   deleting = false,
   viewerState = null,
   previewController = null;
+// Session-only blobs: HTTP responses remain no-store, and no private file is
+// written to browser storage. Thumbnails and the viewer share immutable bytes.
+class PreviewCache {
+  constructor(maxBytes = 32 * 1024 * 1024, maxEntries = 32) {
+    this.maxBytes = maxBytes;
+    this.maxEntries = maxEntries;
+    this.entries = new Map();
+    this.bytes = 0;
+    this.active = 0;
+    this.queue = [];
+  }
+  remove(key, entry) {
+    if (this.entries.get(key) !== entry) return;
+    this.entries.delete(key);
+    this.bytes -= entry.blob?.size || 0;
+    clearTimeout(entry.timer);
+    entry.controller.abort();
+  }
+  clear(itemId) {
+    for (const [key, entry] of this.entries)
+      if (!itemId || entry.itemId === itemId) this.remove(key, entry);
+    this.drain();
+  }
+  trim() {
+    for (const [key, entry] of this.entries) {
+      if (this.bytes <= this.maxBytes && this.entries.size <= this.maxEntries)
+        break;
+      if (entry.blob) this.remove(key, entry);
+    }
+  }
+  drain() {
+    while (this.active < 2 && this.queue.length) this.queue.shift()();
+  }
+  acquire(item, file) {
+    const key = [item.id, file.id, file.sha256, file.size, file.preview].join(
+      "/",
+    );
+    let entry = this.entries.get(key);
+    if (!entry) {
+      entry = { itemId: item.id, controller: new AbortController(), users: 0 };
+      this.entries.set(key, entry);
+      entry.promise = new Promise((resolve, reject) => {
+        this.queue.push(async () => {
+          if (entry.controller.signal.aborted) {
+            reject(new DOMException("Canceled", "AbortError"));
+            return;
+          }
+          this.active++;
+          try {
+            const response = await fetch(previewUrl(item, file), {
+              signal: entry.controller.signal,
+              cache: "no-store",
+            });
+            if (!response.ok) {
+              if (response.status === 401) showLogin();
+              const error = await response.json();
+              throw new Error(error.error || "无法预览");
+            }
+            const type = response.headers.get("Content-Type") || "";
+            if (
+              (file.preview === "text" && !type.startsWith("text/plain")) ||
+              (file.preview === "image" &&
+                !/^image\/(png|jpeg|gif|webp)(;|$)/.test(type))
+            )
+              throw new Error("预览格式无效");
+            const blob = await response.blob();
+            aborted(entry.controller.signal);
+            if (
+              blob.size >
+              (file.preview === "text" ? 1024 * 1024 : 20 * 1024 * 1024)
+            )
+              throw new Error("预览文件过大");
+            entry.blob = blob;
+            this.bytes += blob.size;
+            this.trim();
+            resolve(blob);
+          } catch (error) {
+            this.remove(key, entry);
+            reject(error);
+          } finally {
+            this.active--;
+            this.drain();
+          }
+        });
+      });
+    } else {
+      this.entries.delete(key);
+      this.entries.set(key, entry);
+    }
+    clearTimeout(entry.timer);
+    entry.users++;
+    this.drain();
+    let released = false;
+    return {
+      promise: entry.promise,
+      release: () => {
+        if (released) return;
+        released = true;
+        entry.users--;
+        if (!entry.users && !entry.blob)
+          // Let a synchronous redraw attach its new nodes to the same request.
+          entry.timer = setTimeout(() => {
+            if (!entry.users) this.remove(key, entry);
+            this.drain();
+          }, 200);
+      },
+    };
+  }
+}
+const previews = new PreviewCache();
+let thumbnailObserver = null,
+  thumbnailReleases = new Set();
+function clearThumbnails() {
+  thumbnailObserver?.disconnect();
+  thumbnailObserver = null;
+  for (const release of thumbnailReleases) release();
+  thumbnailReleases.clear();
+}
+async function cachedPreview(item, file, signal) {
+  aborted(signal);
+  const request = previews.acquire(item, file);
+  signal?.addEventListener("abort", request.release, { once: true });
+  try {
+    const blob = await request.promise;
+    aborted(signal);
+    return blob;
+  } finally {
+    signal?.removeEventListener("abort", request.release);
+    request.release();
+  }
+}
+function thumbnail(image, item, file, tile) {
+  if (!thumbnailObserver)
+    thumbnailObserver = new IntersectionObserver(
+      (entries, observer) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          observer.unobserve(entry.target);
+          entry.target.loadPreview();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+  image.loadPreview = async () => {
+    if (!image.isConnected || !csrf) return;
+    const request = previews.acquire(item, file);
+    thumbnailReleases.add(request.release);
+    try {
+      const blob = await request.promise;
+      if (!image.isConnected || !csrf) return;
+      const url = URL.createObjectURL(blob);
+      const releaseUrl = () => {
+        URL.revokeObjectURL(url);
+        thumbnailReleases.delete(releaseUrl);
+      };
+      thumbnailReleases.add(releaseUrl);
+      image.onload = releaseUrl;
+      image.onerror = () => {
+        releaseUrl();
+        image.remove();
+        tile.prepend(node("span", "图片", "file-symbol"));
+      };
+      image.src = url;
+    } catch (error) {
+      if (error.name !== "AbortError" && image.isConnected) {
+        image.remove();
+        tile.classList.add("preview-unavailable");
+        tile.prepend(node("span", "图片", "file-symbol"));
+      }
+    } finally {
+      request.release();
+      thumbnailReleases.delete(request.release);
+    }
+  };
+  thumbnailObserver.observe(image);
+}
 try {
   tasks = JSON.parse(
     sessionStorage.getItem("myserver-inbox-transfers") || "[]",
@@ -81,6 +257,10 @@ function button(text, action, cls = "quiet") {
   return b;
 }
 function showLogin() {
+  previews.clear();
+  clearThumbnails();
+  items = [];
+  $("items").replaceChildren();
   $("login").hidden = false;
   $("workspace").hidden = true;
   $("logout").hidden = true;
@@ -659,6 +839,7 @@ async function deleteItems(chosen) {
     for (const item of chosen) {
       try {
         await api("/inbox/items/" + item.id, "DELETE");
+        previews.clear(item.id);
         pickedItems.delete(item.id);
         removed++;
       } catch (error) {
@@ -694,6 +875,7 @@ $("selection-toggle").onclick = () => {
   renderItems();
 };
 function renderItems() {
+  clearThumbnails();
   renderSelection();
   $("items").replaceChildren();
   if (!items.length) {
@@ -788,26 +970,20 @@ function renderItems() {
     if (item.note) card.append(node("p", item.note, "item-note"));
     const attachments = node("div", undefined, "attachments");
     item.files.forEach((file, index) => {
-      const thumbnail =
+      const showThumbnail =
         file.preview === "image" && file.size <= 2 * 1024 * 1024;
       const tile = button(
         "",
         () => openViewer(item, index),
-        "file-tile" + (thumbnail ? " image-tile" : ""),
+        "file-tile" + (showThumbnail ? " image-tile" : ""),
       );
       tile.setAttribute("aria-label", "预览：" + file.name);
-      if (thumbnail) {
+      if (showThumbnail) {
         const image = node("img");
-        image.src = previewUrl(item, file);
         image.alt = file.name;
-        image.loading = "lazy";
         image.decoding = "async";
-        image.onerror = () => {
-          image.remove();
-          tile.classList.add("preview-unavailable");
-          tile.prepend(node("span", "图片", "file-symbol"));
-        };
         tile.append(image);
+        thumbnail(image, item, file, tile);
       } else
         tile.append(
           node(
@@ -888,6 +1064,7 @@ async function openViewer(item, index) {
   $("viewer-meta").textContent =
     (typeNames[file.kind] || "文件") + " · " + bytes(file.size);
   $("viewer-download").hidden = false;
+  $("viewer-download").removeAttribute("download");
   $("viewer-download").href = downloadUrl(item, file);
   $("viewer-copy").hidden = true;
   viewerNavigation();
@@ -902,14 +1079,7 @@ async function openViewer(item, index) {
     previewController = new AbortController();
     const signal = previewController.signal;
     try {
-      const response = await fetch(previewUrl(item, file), { signal });
-      if (!response.ok) {
-        const value = await response.json();
-        throw new Error(value.error || "无法预览");
-      }
-      if (!response.headers.get("Content-Type")?.startsWith("text/plain"))
-        throw new Error("预览格式无效");
-      const text = await response.text();
+      const text = await (await cachedPreview(item, file, signal)).text();
       if (signal.aborted) return;
       target.replaceChildren(node("pre", text, "viewer-text"));
       $("viewer-copy").hidden = false;
@@ -922,20 +1092,39 @@ async function openViewer(item, index) {
       if (error.name !== "AbortError") status.textContent = error.message;
     }
   } else if (file.preview === "image") {
+    previewController = new AbortController();
+    const signal = previewController.signal;
     const image = node("img");
     image.alt = file.name;
     image.className = "viewer-image";
-    image.onload = () => {
-      status.remove();
-      $("viewer-zoom").hidden = false;
-    };
     image.ondblclick = toggleZoom;
-    image.onerror = () => {
-      image.remove();
-      failure();
-    };
-    image.src = previewUrl(item, file);
-    target.append(image);
+    try {
+      const blob = await cachedPreview(item, file, signal);
+      if (signal.aborted) return;
+      const url = URL.createObjectURL(blob);
+      const releaseUrl = () => URL.revokeObjectURL(url);
+      signal.addEventListener("abort", releaseUrl, { once: true });
+      $("viewer-download").href = url;
+      $("viewer-download").download = file.name;
+      image.onload = () => {
+        if (signal.aborted) return;
+        status.remove();
+        $("viewer-zoom").hidden = false;
+      };
+      image.onerror = () => {
+        releaseUrl();
+        image.remove();
+        if (!signal.aborted) {
+          $("viewer-download").href = downloadUrl(item, file);
+          $("viewer-download").removeAttribute("download");
+          failure();
+        }
+      };
+      image.src = url;
+      target.append(image);
+    } catch (error) {
+      if (error.name !== "AbortError") status.textContent = error.message;
+    }
   } else if (file.preview === "video" || file.preview === "audio") {
     const media = node(file.preview);
     media.controls = true;

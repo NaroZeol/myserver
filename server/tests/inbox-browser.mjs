@@ -55,7 +55,13 @@ try {
     acceptDownloads: true,
   });
   const errors = [];
+  const previewRequests = new Map();
   page.on("pageerror", (error) => errors.push(error.message));
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith("/api/preview/"))
+      previewRequests.set(path, (previewRequests.get(path) || 0) + 1);
+  });
   await page.goto(ready.url);
   assert.equal(
     (await page.request.get(ready.url + "/api/inbox")).status(),
@@ -292,6 +298,34 @@ try {
       "safe text",
   );
   assert.equal(await page.locator("#viewer script,#viewer iframe").count(), 0);
+  const textPreviewPath = await page.evaluate(() => {
+    const { item, index } = viewerState;
+    return previewUrl(item, item.files[index]);
+  });
+  assert.equal(previewRequests.get(textPreviewPath), 1);
+  await page.locator("#viewer-close").click();
+  await card.locator(".file-tile").nth(2).click();
+  await page.waitForFunction(
+    () =>
+      document.querySelector("#viewer-content pre")?.textContent ===
+      "safe text",
+  );
+  assert.equal(
+    previewRequests.get(textPreviewPath),
+    1,
+    "reopening text should reuse private bytes",
+  );
+  await page.evaluate(async () => {
+    const { item, index } = viewerState,
+      file = item.files[index];
+    previews.clear(item.id);
+    await Promise.all([cachedPreview(item, file), cachedPreview(item, file)]);
+  });
+  assert.equal(
+    previewRequests.get(textPreviewPath),
+    2,
+    "concurrent preview readers should share one transfer",
+  );
   await page.locator("#viewer-close").click();
   await card.locator(".item-more summary").click();
   await card.getByRole("button", { name: "编辑", exact: true }).click();
@@ -348,18 +382,16 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     () => document.querySelectorAll("article.item").length === 3,
   );
   await page.locator("#selection-toggle").click();
-  await page
-    .locator("#files")
-    .setInputFiles([
-      {
-        name: "草稿配图.png",
-        mimeType: "image/png",
-        buffer: Buffer.from(
-          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aB9sAAAAASUVORK5CYII=",
-          "base64",
-        ),
-      },
-    ]);
+  await page.locator("#files").setInputFiles([
+    {
+      name: "草稿配图.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aB9sAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    },
+  ]);
   await page.locator("#send").click();
   await page.waitForFunction(
     () =>
@@ -376,7 +408,45 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
   await page.waitForFunction(
     () => document.querySelector("#viewer img")?.naturalWidth > 0,
   );
+  const imagePreviewPath = await page.evaluate(() => {
+    const { item, index } = viewerState;
+    return previewUrl(item, item.files[index]);
+  });
+  assert.equal(
+    previewRequests.get(imagePreviewPath),
+    1,
+    "thumbnail and viewer should share one transfer",
+  );
+  const imageDownloadPromise = page.waitForEvent("download");
+  await page.locator("#viewer-download").click();
+  const imageDownload = await imageDownloadPromise;
+  assert.equal(imageDownload.suggestedFilename(), "草稿配图.png");
+  assert.equal(
+    (await readFile(await imageDownload.path())).subarray(0, 8).toString("hex"),
+    "89504e470d0a1a0a",
+  );
+  assert.equal(
+    previewRequests.get(imagePreviewPath),
+    1,
+    "saving an already previewed image must use the same bytes",
+  );
   await page.locator("#viewer-close").click();
+  for (let i = 0; i < 2; i++) {
+    await page.locator("#selection-toggle").click();
+    await page.waitForFunction(
+      () => document.querySelector(".image-tile img")?.naturalWidth > 0,
+    );
+  }
+  await page.locator(".image-tile").click();
+  await page.waitForFunction(
+    () => document.querySelector("#viewer img")?.naturalWidth > 0,
+  );
+  await page.locator("#viewer-close").click();
+  assert.equal(
+    previewRequests.get(imagePreviewPath),
+    1,
+    "selection redraws and reopening must not redownload images",
+  );
   await page.locator("#filter-toggle").click();
   await page.locator("#source-filter").selectOption("server");
   await page.waitForFunction(
@@ -398,6 +468,14 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
   await page.waitForFunction(
     () =>
       document.querySelector("article.item h2")?.textContent === "草稿配图.png",
+  );
+  await page.waitForFunction(
+    () => document.querySelector(".image-tile img")?.naturalWidth > 0,
+  );
+  assert.equal(
+    previewRequests.get(imagePreviewPath),
+    1,
+    "filtering and sorting must keep immutable image bytes",
   );
   await page.locator("#filter-toggle").click();
   await page.screenshot({
@@ -428,15 +506,125 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
   await page.waitForFunction(
     () => document.querySelectorAll("article.item").length === 0,
   );
+  assert.equal(
+    await page.evaluate(() => previews.entries.size),
+    0,
+    "deleting items must evict their previews",
+  );
+  const cacheChecks = await page.evaluate(async () => {
+    const originalFetch = window.fetch;
+    let transfers = 0;
+    window.fetch = async () => {
+      transfers++;
+      return new Response(new Uint8Array(8), {
+        headers: { "Content-Type": "image/png" },
+      });
+    };
+    try {
+      const cache = new PreviewCache(16, 2);
+      const item = { id: "cache-test" };
+      const file = (id, sha256 = "first") => ({
+        id,
+        sha256,
+        size: 8,
+        preview: "image",
+      });
+      async function take(value) {
+        const request = cache.acquire(item, value);
+        try {
+          await request.promise;
+        } finally {
+          request.release();
+        }
+      }
+      await take(file("a"));
+      await take(file("b"));
+      await take(file("a"));
+      await take(file("c"));
+      const bounded = cache.bytes <= 16 && cache.entries.size === 2;
+      await take(file("a"));
+      const hitTransfers = transfers;
+      await take(file("a", "changed"));
+      const newDigestTransfers = transfers;
+      cache.clear();
+      let finishTransfer,
+        canceledTransfers = 0;
+      window.fetch = async (_url, options) => {
+        await new Promise((resolve, reject) => {
+          finishTransfer = resolve;
+          options.signal.addEventListener(
+            "abort",
+            () => {
+              canceledTransfers++;
+              reject(new DOMException("Canceled", "AbortError"));
+            },
+            { once: true },
+          );
+        });
+        return new Response(new Uint8Array(8), {
+          headers: { "Content-Type": "image/png" },
+        });
+      };
+      const first = cache.acquire(item, file("shared"));
+      const second = cache.acquire(item, file("shared"));
+      first.release();
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const sharedSurvives = canceledTransfers === 0;
+      finishTransfer();
+      await Promise.all([first.promise, second.promise]);
+      second.release();
+      const abandoned = cache.acquire(item, file("abandoned"));
+      const abandonedResult = abandoned.promise.catch((error) => error.name);
+      abandoned.release();
+      const abandonedCanceled = (await abandonedResult) === "AbortError";
+      const cleared = cache.acquire(item, file("cleared"));
+      const clearedResult = cleared.promise.catch((error) => error.name);
+      cache.clear();
+      const clearCanceled = (await clearedResult) === "AbortError";
+      window.fetch = async () =>
+        new Response(new Uint8Array(8), {
+          headers: { "Content-Type": "image/png" },
+        });
+      // Seed the real cache to prove logout also drops remaining session data.
+      const request = previews.acquire(item, file("logout"));
+      await request.promise;
+      request.release();
+      return {
+        bounded,
+        hitTransfers,
+        newDigestTransfers,
+        sharedSurvives,
+        abandonedCanceled,
+        clearCanceled,
+        empty: cache.bytes === 0 && cache.entries.size === 0,
+      };
+    } finally {
+      window.fetch = originalFetch;
+    }
+  });
+  assert.deepEqual(cacheChecks, {
+    bounded: true,
+    hitTransfers: 3,
+    newDigestTransfers: 4,
+    sharedSurvives: true,
+    abandonedCanceled: true,
+    clearCanceled: true,
+    empty: true,
+  });
   await page.locator("#logout").click();
   await page.locator("#login").waitFor({ state: "visible" });
+  assert.equal(
+    await page.evaluate(() => previews.bytes + previews.entries.size),
+    0,
+    "logout must clear session preview bytes",
+  );
   assert.equal(
     (await page.request.get(ready.url + "/api/inbox")).status(),
     401,
   );
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser token login, multi-file upload and resume integrity, image/text previews, type/source/sort filters, ZIP downloads, edit/search/batch delete, logout and responsive layout",
+    "PASS: browser token login, multi-file upload and resume integrity, bounded private preview cache and request deduplication, image/text previews, type/source/sort filters, ZIP downloads, edit/search/batch delete, logout and responsive layout",
   );
 } finally {
   if (browser) await browser.close();
