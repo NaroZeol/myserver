@@ -161,7 +161,9 @@ public final class InboxMediaChecks {
           screen.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
           find(screen.getWindow().getDecorView(), "更多").performClick();
         });
+        final boolean[] galleryClicked = { false };
         TerminalChecks.await(() -> {
+          if (galleryClicked[0]) return true;
           AccessibilityNodeInfo root = test
             .getUiAutomation()
             .getRootInActiveWindow();
@@ -170,9 +172,12 @@ public final class InboxMediaChecks {
             "保存到相册"
           )) {
             while (node != null && !node.isClickable()) node = node.getParent();
-            if (node != null) return node.performAction(
-              AccessibilityNodeInfo.ACTION_CLICK
-            );
+            if (node != null) {
+              galleryClicked[0] = node.performAction(
+                AccessibilityNodeInfo.ACTION_CLICK
+              );
+              return galleryClicked[0];
+            }
           }
           return false;
         }, "Gallery action missing from image menu");

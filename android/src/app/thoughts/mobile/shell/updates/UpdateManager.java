@@ -451,17 +451,22 @@ public final class UpdateManager {
     PackageManager manager = context.getPackageManager();
     PackageInfo info = manager.getPackageArchiveInfo(
       apk.getPath(),
-      signatureFlags()
+      // Android 10 collects archive certificates only with the legacy flag.
+      signatureFlags() | PackageManager.GET_SIGNATURES
+    );
+    if (info == null) throw new IOException("系统无法读取安装包信息");
+    if (!info.packageName.equals(release.packageName)) throw new IOException(
+      "安装包包名与发布信息不一致"
     );
     if (
-      info == null ||
-      !info.packageName.equals(release.packageName) ||
       (Build.VERSION.SDK_INT >= 28
         ? info.getLongVersionCode()
         : info.versionCode) != release.code ||
-      !release.version.equals(info.versionName) ||
+      !release.version.equals(info.versionName)
+    ) throw new IOException("安装包版本与发布信息不一致");
+    if (
       !certificates(info).equals(Collections.singleton(release.certificate))
-    ) throw new IOException("安装包身份校验失败");
+    ) throw new IOException("安装包签名与发布信息不一致");
     try {
       PackageInfo installed = manager.getPackageInfo(
         release.packageName,
