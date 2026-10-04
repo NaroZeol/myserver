@@ -274,3 +274,39 @@ def test_interrupted_bundle_closes_every_open_attachment(web,database,monkeypatc
     status,_,_raw=request('/api/bundle?items='+data['id'],headers=auth)
     assert status==200
     assert len(opened)==2 and all(handle.closed for handle in opened)
+
+
+@pytest.mark.parametrize('failure', ['eof', 'error'])
+def test_bundle_source_failure_cannot_finalize_a_valid_truncated_archive(web,database,monkeypatch,failure):
+    import io
+    from pathlib import Path
+    import zipfile
+    from test_inbox import call,upload,commit
+    server,request=web;auth=login(server,request)
+    content=b'second complete file'*10000
+    data=manifest(b'first complete file',content)
+    call(database,'/inbox/uploads','POST',data)
+    upload(database,data,0,b'first complete file');upload(database,data,1,content);commit(database,data)
+    original_open=Path.open;opened=[]
+    class FailingReader:
+        def __init__(self,source):self.source=source;self.reads=0
+        def __enter__(self):return self
+        def __exit__(self,*_args):self.source.close()
+        def fileno(self):return self.source.fileno()
+        def read(self,_size):
+            self.reads+=1
+            if self.reads==1:return self.source.read(7)
+            if failure=='eof':return b''
+            raise OSError('Injected storage read failure')
+    def failing_open(path,*args,**kwargs):
+        handle=original_open(path,*args,**kwargs)
+        if path.parent.name==data['id'] and path.parent.parent.name=='objects':
+            opened.append(handle)
+            if path.name==data['files'][1]['id']:return FailingReader(handle)
+        return handle
+    monkeypatch.setattr(Path,'open',failing_open)
+    status,_,raw=request('/api/bundle?items='+data['id'],headers=auth)
+    assert status==200 and raw.startswith(b'PK')
+    assert len(opened)==2 and all(handle.closed for handle in opened)
+    with pytest.raises(zipfile.BadZipFile):zipfile.ZipFile(io.BytesIO(raw))
+    assert b'PK\x05\x06' not in raw  # No end-of-central-directory success marker.

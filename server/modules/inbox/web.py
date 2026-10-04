@@ -106,6 +106,10 @@ class ZipStream:
     def __init__(self, handler):
         self.handler = handler
         self.position = 0
+        self.aborted = False
+
+    def abort(self):
+        self.aborted = True
 
     def tell(self):
         return self.position
@@ -114,13 +118,21 @@ class ZipStream:
         raise io.UnsupportedOperation('stream')
 
     def write(self, value):
-        if not self.handler.server.active():
-            raise TimeoutError('Inbox download expired or maintenance started')
-        self.handler.wfile.write(value)
-        self.position += len(value)
-        return len(value)
+        if self.aborted:
+            raise OSError('ZIP stream aborted')
+        try:
+            if not self.handler.server.active():
+                raise TimeoutError('Inbox download expired or maintenance started')
+            self.handler.wfile.write(value)
+            self.position += len(value)
+            return len(value)
+        except BaseException:
+            self.abort()
+            raise
 
     def flush(self):
+        if self.aborted:
+            raise OSError('ZIP stream aborted')
         self.handler.wfile.flush()
 
 
@@ -357,18 +369,30 @@ class Handler(BaseHTTPRequestHandler):
             self.headers_out(200, 'application/zip', None, {'Content-Disposition': 'attachment; filename="myserver-inbox.zip"'})
             writer = ZipStream(self)
             with zipfile.ZipFile(writer, mode='w', compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
-                for name, content, size in entries:
-                    if size is None:
-                        archive.writestr(name, content)
-                    else:
-                        with archive.open(name, mode='w', force_zip64=True) as target:
-                            remaining = size
-                            while remaining:
-                                block = content.read(min(65536, remaining))
-                                if not block:
-                                    raise OSError('Unexpected EOF in immutable inbox object')
-                                target.write(block)
-                                remaining -= len(block)
+                try:
+                    for name, content, size in entries:
+                        if size is None:
+                            archive.writestr(name, content)
+                        else:
+                            with archive.open(name, mode='w', force_zip64=True) as target:
+                                try:
+                                    remaining = size
+                                    while remaining:
+                                        block = content.read(min(65536, remaining))
+                                        if not block:
+                                            raise OSError('Unexpected EOF in immutable inbox object')
+                                        target.write(block)
+                                        remaining -= len(block)
+                                except BaseException:
+                                    # Abort before the member context can write a
+                                    # descriptor for partial content. ZIP close
+                                    # must also be unable to emit its success
+                                    # directory after a storage read failure.
+                                    writer.abort()
+                                    raise
+                except BaseException:
+                    writer.abort()
+                    raise
 
     def download(self, path):
         parts = path.split('/')
