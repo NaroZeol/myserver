@@ -106,7 +106,20 @@
     if (document.body.clientHeight <= 0) return;
     const position = terminal.buffer.active.viewportY;
     const following = position >= terminal.buffer.active.baseY;
+    const selection = terminal.getSelectionPosition();
+    const selectedText = selection ? terminal.getSelection() : '';
+    const columns = terminal.cols;
     fit.fit();
+    if (selection && columns !== terminal.cols) {
+      // Column reflow changes buffer coordinates; never restore an old range.
+      terminal.clearSelection();
+    } else if (selection && selectedText && !terminal.hasSelection()) {
+      // xterm clears selections on row changes, including a late IME resize.
+      // Restore only if the same cells still contain exactly the selected text.
+      const length = (selection.end.y - selection.start.y) * columns + selection.end.x - selection.start.x;
+      terminal.select(selection.start.x, selection.start.y, length);
+      if (terminal.getSelection() !== selectedText) terminal.clearSelection();
+    }
     requestAnimationFrame(() => {
       if (following) terminal.scrollToBottom(); else terminal.scrollToLine(position);
     });

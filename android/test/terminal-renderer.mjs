@@ -178,8 +178,34 @@ try {
     await touch('touchMove', [[point[0] + 67, point[1] + 14]]);
     await touch('touchEnd', []);
     assert.match(await page.evaluate(() => TerminalUI.selection()), /hello 世界/);
+    // Android's IME can finish resizing after a long press has selected text.
+    // Exercise real fit/layout events, including a multiline, wide-cell range.
+    await page.evaluate(() => terminal.select(0, terminal.buffer.active.viewportY, terminal.cols + 6));
+    const selectedBeforeResize = await page.evaluate(() => TerminalUI.selection());
+    assert.equal(selectedBeforeResize, 'hello 世界\nsecond');
+    const fullRows = await page.evaluate(() => terminal.rows);
+    await page.setViewportSize({width: 390, height: 340});
+    await page.waitForFunction(rows => terminal.rows < rows, fullRows);
+    assert.equal(await page.evaluate(() => TerminalUI.selection()), selectedBeforeResize, 'IME height shrink must preserve exactly the selected text');
+    assert.equal(await page.evaluate(() => events.selection), true, 'Selection toolbar must remain active after IME shrink');
+    await page.setViewportSize({width: 390, height: 660});
+    await page.waitForFunction(rows => terminal.rows === rows, fullRows);
+    assert.equal(await page.evaluate(() => TerminalUI.selection()), selectedBeforeResize, 'IME height expansion must preserve exactly the selected text');
     await page.evaluate(() => TerminalUI.clearSelection());
     assert.equal(await page.evaluate(() => events.selection), false);
+    await page.setViewportSize({width: 390, height: 340});
+    await page.waitForFunction(rows => terminal.rows < rows, fullRows);
+    assert.equal(await page.evaluate(() => TerminalUI.selection()), '', 'A resize must not resurrect an explicitly cleared selection');
+    await page.setViewportSize({width: 390, height: 660});
+    await page.waitForFunction(rows => terminal.rows === rows, fullRows);
+    await page.evaluate(() => terminal.select(0, terminal.buffer.active.viewportY, terminal.cols + 6));
+    const fullCols = await page.evaluate(() => terminal.cols);
+    await page.setViewportSize({width: 280, height: 660});
+    await page.waitForFunction(cols => terminal.cols < cols, fullCols);
+    assert.equal(await page.evaluate(() => TerminalUI.selection()), '', 'Column reflow must discard the old coordinates rather than copy a different range');
+    await page.setViewportSize({width: 390, height: 660});
+    await page.waitForFunction(cols => terminal.cols === cols, fullCols);
+    assert.equal(await page.evaluate(() => TerminalUI.selection()), '', 'Re-expanding columns must not resurrect the old selection');
     await page.evaluate(() => window.dispatchEvent(new Event('blur')));
     await touch('touchStart', [[100, 180], [200, 180]]);
     await touch('touchMove', [[70, 180], [230, 180]]);
@@ -201,8 +227,20 @@ try {
     await page.setViewportSize({width: 390, height: 340});
     await page.waitForTimeout(150);
     assert.equal(await page.evaluate(() => terminal.buffer.active.viewportY === terminal.buffer.active.baseY), true, 'Prompt follows IME shrink');
+    // At the scrollback limit, shrinking can trim lines and make an old range
+    // point at different text. The equality guard must reject that restoration.
+    await page.evaluate(() => { terminal.options.scrollback = 1; });
+    const rowsBeforeTrim = await page.evaluate(() => terminal.rows);
+    await write(Array.from({length: rowsBeforeTrim + 5}, (_, i) => `trim fixture ${i}\r\n`).join(''));
+    await page.evaluate(() => terminal.select(0, 0, terminal.cols));
+    const beforeTrim = await page.evaluate(() => TerminalUI.selection());
+    assert.match(beforeTrim, /^trim fixture \d+$/);
+    await page.setViewportSize({width: 390, height: 240});
+    await page.waitForFunction(rows => terminal.rows < rows, rowsBeforeTrim);
+    assert.notEqual(await page.evaluate(() => terminal.buffer.active.getLine(0).translateToString(true)), beforeTrim, 'Fixture must actually trim the previously selected cells');
+    assert.equal(await page.evaluate(() => TerminalUI.selection()), '', 'Changed buffer coordinates must not restore a different text selection');
     assert.deepEqual(errors, []);
     await page.close();
   }
-  console.log('PASS: terminal modifiers/Fn keys, Ctrl+/, touch mouse protocols and alternate screen, protocol replies, bracketed paste, selection/handles, pinch and history (normal + legacy DOM)');
+  console.log('PASS: terminal modifiers/Fn keys, Ctrl+/, touch mouse protocols and alternate screen, protocol replies, bracketed paste, selection/handles and IME resize, pinch and history (normal + legacy DOM)');
 } finally { await browser.close(); }
