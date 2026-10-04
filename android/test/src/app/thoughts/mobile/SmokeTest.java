@@ -139,7 +139,14 @@ public final class SmokeTest extends Instrumentation {
           "inbox",
           "settings",
         }) {
-          runOnMainSync(() -> screen.navigate(page));
+          runOnMainSync(() -> {
+            screen.navigate(page);
+            // Visual fixtures contain synthetic data only. Keep FLAG_SECURE in
+            // production, but allow the test runner to inspect this layout.
+            screen
+              .getWindow()
+              .clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+          });
           screenshot(page);
         }
         runOnMainSync(() -> {
@@ -454,6 +461,13 @@ public final class SmokeTest extends Instrumentation {
     waitForIdleSync();
     android.os.SystemClock.sleep(250);
     android.graphics.Bitmap bitmap = getUiAutomation().takeScreenshot();
+    for (int retry = 0; bitmap == null && retry < 3; retry++) {
+      android.os.SystemClock.sleep(250);
+      bitmap = getUiAutomation().takeScreenshot();
+    }
+    if (bitmap == null) {
+      throw new AssertionError("Screenshot unavailable: " + name);
+    }
     java.io.File dir = new java.io.File(
       getTargetContext().getExternalFilesDir(null),
       "screenshots"
