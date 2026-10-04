@@ -38,45 +38,32 @@ def prepare_build(directory, environment):
         raise ValueError('Invalid Android version name')
     manifest = re.sub(r'android:versionCode="[^"]+"', 'android:versionCode="' + code + '"', manifest, count=1)
     manifest = re.sub(r'android:versionName="[^"]+"', 'android:versionName="' + version + '"', manifest, count=1)
-    preview = environment.get('MYSERVER_PREVIEW') == '1'
-    if preview:
-        manifest = manifest.replace('package="app.thoughts.mobile"', 'package="app.thoughts.mobile.preview"').replace('android:label="myserver"', 'android:label="myserver·预览"')
-        manifest = manifest.replace('android:authorities="app.thoughts.mobile.', 'android:authorities="app.thoughts.mobile.preview.')
     build = directory / 'build'
     build.mkdir(exist_ok=True)
     shutil.rmtree(build / 'res', ignore_errors=True)
     shutil.copytree(directory / 'res', build / 'res')
-    if preview:
-        shortcuts = build / 'res/xml/shortcuts.xml'
-        shortcuts.write_text(shortcuts.read_text().replace('android:targetPackage="app.thoughts.mobile"', 'android:targetPackage="app.thoughts.mobile.preview"'))
     shutil.rmtree(build / 'assets', ignore_errors=True)
     shutil.copytree(directory / 'assets', build / 'assets')
     repo = environment.get('MYSERVER_UPDATE_REPOSITORY', '')
-    channel = environment.get('MYSERVER_UPDATE_CHANNEL', 'preview' if preview else 'stable')
+    channel = environment.get('MYSERVER_UPDATE_CHANNEL', 'stable')
     branch = environment.get('MYSERVER_UPDATE_BRANCH', '')
     commit = environment.get('MYSERVER_UPDATE_COMMIT', '')
-    if channel not in ('stable', 'preview') or (channel == 'preview') != preview:
-        raise ValueError('Update channel must match the application package')
+    if channel != 'stable':
+        raise ValueError('All branches use the stable application identity')
     if repo:
         repository(repo)
         if not branch or len(branch.encode()) > 255 or any(ord(c) < 32 for c in branch):
             raise ValueError('A published build needs its source branch')
         if not re.fullmatch('[0-9a-f]{40}', commit):
             raise ValueError('A published build needs its full source commit')
-        if channel == 'stable' and branch != 'main':
-            raise ValueError('Stable builds must come from main')
     source = dict(schema=1, repository=repo, channel=channel, branch=branch, commit=commit)
     (build / 'assets/update-source.json').write_text(json.dumps(source, ensure_ascii=False, separators=(',', ':')) + '\n')
     (build / 'AndroidManifest.xml').write_text(manifest)
     return source
 
 
-def release_tag(channel, branch, code):
-    if channel == 'stable':
-        return 'android-stable-' + str(code)
-    slug = re.sub('[^a-z0-9]+', '-', branch.lower()).strip('-')[:32].rstrip('-') or 'branch'
-    digest = hashlib.sha256(branch.encode()).hexdigest()[:12]
-    return f'android-preview-{slug}-{digest}-{code}'
+def release_tag(code):
+    return 'android-stable-' + str(code)
 
 
 def command(*args, **kwargs):
@@ -106,13 +93,12 @@ def create_manifest(apk, build_tools, expected):
     if source != expected:
         raise ValueError('Tested APK provenance differs from the publishing run')
     metadata = apk_metadata(apk, build_tools)
-    wanted = 'app.thoughts.mobile' + ('.preview' if source['channel'] == 'preview' else '')
-    if metadata['package_name'] != wanted:
-        raise ValueError('APK package does not match the selected channel')
+    if source['channel'] != 'stable' or metadata['package_name'] != 'app.thoughts.mobile':
+        raise ValueError('APK must use the stable application identity')
     code = CODE_OFFSET + int(os.environ['GITHUB_RUN_NUMBER'])
     if metadata['version_code'] != code:
         raise ValueError('APK versionCode differs from the tested workflow run')
-    tag = release_tag(source['channel'], source['branch'], code)
+    tag = release_tag(code)
     base = 'https://github.com/' + repository(source['repository'])
     digest = hashlib.sha256()
     with apk.open('rb') as stream:
@@ -163,13 +149,12 @@ def publish(apk, build_tools):
     branch, commit = env['GITHUB_REF_NAME'], env['GITHUB_SHA']
     if not re.fullmatch('[0-9a-f]{40}', commit):
         raise ValueError('Invalid publishing commit')
-    channel = 'stable' if branch == 'main' else 'preview'
-    expected = dict(schema=1, repository=repo, channel=channel, branch=branch, commit=commit)
+    expected = dict(schema=1, repository=repo, channel='stable', branch=branch, commit=commit)
     if remote_head(repo, branch) != commit:
         print('Source branch has advanced; this older run will not publish.')
         return
     manifest = create_manifest(apk, build_tools, expected)
-    tag = release_tag(channel, branch, manifest['version_code'])
+    tag = release_tag(manifest['version_code'])
     old = existing_release(repo, tag)
     if old:
         previous = release_document(old.get('body') or '')
@@ -182,27 +167,25 @@ def publish(apk, build_tools):
         directory = Path(temporary)
         (directory / 'update.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
         source_url = 'https://github.com/' + repo + '/commit/' + commit
-        body = ('myserver ' + manifest['version_name'] + ' · ' + channel + '\n\n'
+        body = ('myserver ' + manifest['version_name'] + '\n\n'
                 + 'Source branch: `' + branch.replace('`', '') + '`\n\n'
                 + 'Source commit: [' + commit[:12] + '](' + source_url + ')\n\n'
                 + 'Validated on Android 10 and 15. Download `myserver.apk` to install; `update.json` contains package, checksum and signing-certificate metadata.\n\n'
                 + MARKER + json.dumps(manifest, ensure_ascii=False, separators=(',', ':')) + '\n-->\n')
         notes = directory / 'notes.md'
         notes.write_text(body)
-        title = 'myserver ' + manifest['version_name'] + ' · ' + ('stable' if channel == 'stable' else branch) + ' · ' + str(manifest['version_code'])
+        title = 'myserver ' + manifest['version_name'] + ' · ' + branch + ' · ' + str(manifest['version_code'])
         if old:
             command('gh', 'release', 'edit', tag, '--repo', repo, '--title', title, '--notes-file', str(notes))
         else:
             args = ['gh', 'release', 'create', tag, '--repo', repo, '--target', commit, '--draft', '--title', title, '--notes-file', str(notes)]
-            if channel == 'preview':
-                args.append('--prerelease')
             command(*args)
         command('gh', 'release', 'upload', tag, str(apk), str(directory / 'update.json'), '--repo', repo, '--clobber')
         # A force-push/new push during upload must not make a stale build public.
         if remote_head(repo, branch) != commit:
             print('Source branch advanced during upload; leaving the release as an unpublished draft.')
             return
-        command('gh', 'release', 'edit', tag, '--repo', repo, '--draft=false', '--latest=' + ('true' if channel == 'stable' else 'false'))
+        command('gh', 'release', 'edit', tag, '--repo', repo, '--draft=false', '--prerelease=false', '--latest=true')
         print('Published ' + manifest['release_url'])
 
 

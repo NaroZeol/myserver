@@ -474,9 +474,7 @@ public final class UpdateManager {
       );
       if (
         !certificates(installed).equals(certificates(info))
-      ) throw new IOException(
-        "签名不兼容：请先备份并卸载旧预览版，再安装此版本"
-      );
+      ) throw new IOException("安装包签名与当前应用不一致");
       if (
         (Build.VERSION.SDK_INT >= 28
           ? installed.getLongVersionCode()

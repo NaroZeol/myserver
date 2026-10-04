@@ -10,10 +10,6 @@
   <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
-  <queries>
-    <package android:name="app.thoughts.mobile" />
-    <package android:name="app.thoughts.mobile.preview" />
-  </queries>
   <application android:label="myserver" android:theme="@style/AppTheme" android:icon="@drawable/ic_launcher" android:allowBackup="false" android:usesCleartextTraffic="false" android:supportsRtl="true">
     <activity android:name="app.thoughts.mobile.shell.updates.UpdateActivity" android:exported="false" android:configChanges="orientation|screenSize" />
     <provider android:name="app.thoughts.mobile.shell.updates.UpdateFileProvider" android:authorities="app.thoughts.mobile.updates" android:exported="false" android:grantUriPermissions="true" />

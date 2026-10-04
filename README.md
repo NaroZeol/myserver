@@ -48,6 +48,6 @@ Android 公共层 `core/Feature.Host` 提供界面、导航、执行器和连接
 
 ## 验证与发布
 
-`android.yml` 按 Android 文件和原生 SSH 测试依赖触发，生成 `myserver.apk`，在 Android 10 / 15 上验证。`server.yml` 按服务端和部署文件触发，验证 RPC、授权、发布、配置与部署回滚。说明文档和仅网页的改动不会触发 APK 构建。两套模拟器测试通过后，CI 将已验证的 APK 发布到 GitHub Releases：主线为正式版，开发分支为独立预览版，详见 [App 更新](docs/app-updates.md)。CI 不连接生产服务器，不自动部署。
+`android.yml` 按 Android 文件和原生 SSH 测试依赖触发，生成 `myserver.apk`，在 Android 10 / 15 上验证。`server.yml` 按服务端和部署文件触发，验证 RPC、授权、发布、配置与部署回滚。说明文档和仅网页的改动不会触发 APK 构建。两套模拟器测试通过后，CI 将已验证的 APK 发布到 GitHub Releases；主线与开发分支共用包名和发布签名，App 可选择更新分支并覆盖安装，详见 [App 更新](docs/app-updates.md)。CI 不连接生产服务器，不自动部署。
 
 博客等读取端只消费 Gist 中已发布的想法，不请求管理服务。

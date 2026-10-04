@@ -5,14 +5,7 @@ export MYSERVER_KEY_ALIAS="${MYSERVER_KEY_ALIAS:-myserver}"
 export PATH="$JAVA_HOME/bin:$PATH"
 rm -rf build/test/classes build/test/dex
 mkdir -p build/test/classes build/test/dex
-python3 - <<'PY'
-from pathlib import Path
-import os
-s=Path('test/AndroidManifest.xml').read_text()
-if os.environ.get('MYSERVER_PREVIEW')=='1':
-    s=s.replace('android:targetPackage="app.thoughts.mobile"','android:targetPackage="app.thoughts.mobile.preview"')
-Path('build/test/AndroidManifest.xml').write_text(s)
-PY
+cp test/AndroidManifest.xml build/test/AndroidManifest.xml
 "$ANDROID_BUILD_TOOLS/aapt2" link -o build/test/unsigned.apk -I "$ANDROID_JAR" --manifest build/test/AndroidManifest.xml
 find test/src -name '*.java' -print > build/test/sources.txt
 javac -encoding UTF-8 -source 8 -target 8 -bootclasspath "$ANDROID_JAR:$ANDROID_BUILD_TOOLS/core-lambda-stubs.jar" -classpath build/classes:build/deps/jsch-android.jar -d build/test/classes @build/test/sources.txt
@@ -28,7 +21,6 @@ if [[ "${MYSERVER_COMPILE_TEST_ONLY:-0}" != 1 ]]; then
   adb install -r build/myserver.apk
   adb install -r build/test/tests.apk
   apk_package=app.thoughts.mobile
-  [[ "${MYSERVER_PREVIEW:-0}" == 1 ]] && apk_package=app.thoughts.mobile.preview
   if (( $(adb shell getprop ro.build.version.sdk | tr -d '\r') >= 33 )); then
     adb shell pm grant "$apk_package" android.permission.POST_NOTIFICATIONS
   fi
@@ -37,8 +29,6 @@ if [[ "${MYSERVER_COMPILE_TEST_ONLY:-0}" != 1 ]]; then
     ssh_args=(-e ssh_host_key "$(cut -d' ' -f2 build/ssh-fixture/host.pub)" -e ssh_wrong_host_key "$(cut -d' ' -f2 build/ssh-fixture/wrong-host.pub)" -e ssh_user "$(id -un)" -e ssh_password "$(cat build/ssh-fixture/password)")
   fi
   adb shell am instrument -w "${ssh_args[@]}" app.thoughts.mobile.test/app.thoughts.mobile.SmokeTest | tee build/test/result.txt
-  apk_package=app.thoughts.mobile
-  [[ "${MYSERVER_PREVIEW:-0}" == 1 ]] && apk_package=app.thoughts.mobile.preview
   if grep -q 'PASS: native launch' build/test/result.txt; then
     adb shell am instrument -w -e mode visual -e suffix -standard app.thoughts.mobile.test/app.thoughts.mobile.SmokeTest | tee build/test/visual.txt
     adb shell wm size 640x1280

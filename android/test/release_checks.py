@@ -13,8 +13,8 @@ SPEC = importlib.util.spec_from_file_location('android_release', Path(__file__).
 release = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release)
 SHA = 'a' * 40
-SOURCE = dict(schema=1, repository='example/project', channel='preview', branch='feature/inbox', commit=SHA)
-META = dict(package_name='app.thoughts.mobile.preview', version_code=100123, version_name='1.2.0-preview.123', min_sdk=26, certificate_sha256='b' * 64)
+SOURCE = dict(schema=1, repository='example/project', channel='stable', branch='feature/inbox', commit=SHA)
+META = dict(package_name='app.thoughts.mobile', version_code=100123, version_name='1.2.0+123', min_sdk=26, certificate_sha256='b' * 64)
 
 
 class ReleaseChecks(unittest.TestCase):
@@ -51,36 +51,37 @@ class ReleaseChecks(unittest.TestCase):
         self.assertEqual((root / 'build/assets/existing.txt').read_text(), 'unchanged')
         self.assertFalse((root / 'assets/update-source.json').exists())
 
-    def test_preview_injection_and_stale_build_reset(self):
+    def test_all_branches_keep_application_identity_and_refresh_build_provenance(self):
         root = self.android()
-        environment = dict(MYSERVER_PREVIEW='1', MYSERVER_UPDATE_REPOSITORY=SOURCE['repository'], MYSERVER_UPDATE_CHANNEL='preview', MYSERVER_UPDATE_BRANCH=SOURCE['branch'], MYSERVER_UPDATE_COMMIT=SHA, MYSERVER_VERSION_CODE='100123', MYSERVER_VERSION_NAME=META['version_name'])
-        self.assertEqual(release.prepare_build(root, environment), SOURCE)
-        manifest = (root / 'build/AndroidManifest.xml').read_text()
-        self.assertIn('versionCode="100123"', manifest)
-        self.assertIn('app.thoughts.mobile.preview.inbox.files', manifest)
-        self.assertIn('app.thoughts.mobile.preview.updates', manifest)
-        self.assertIn('myserver·预览', manifest)
-        self.assertIn('app.thoughts.mobile.preview', (root / 'build/res/xml/shortcuts.xml').read_text())
+        for number, branch in enumerate(('main', 'feature/inbox', 'feature/文件传输'), 123):
+            with self.subTest(branch=branch):
+                # A stale environment from an old local build cannot select another package.
+                environment = dict(MYSERVER_PREVIEW='1', MYSERVER_UPDATE_REPOSITORY=SOURCE['repository'], MYSERVER_UPDATE_BRANCH=branch, MYSERVER_UPDATE_COMMIT=SHA, MYSERVER_VERSION_CODE=str(100000 + number), MYSERVER_VERSION_NAME='1.2.0+' + str(number))
+                self.assertEqual(release.prepare_build(root, environment), dict(SOURCE, branch=branch))
+                manifest = (root / 'build/AndroidManifest.xml').read_text()
+                self.assertIn('versionCode="' + str(100000 + number) + '"', manifest)
+                self.assertIn('package="app.thoughts.mobile"', manifest)
+                self.assertIn('app.thoughts.mobile.inbox.files', manifest)
+                self.assertIn('app.thoughts.mobile.updates', manifest)
+                self.assertIn('android:label="myserver"', manifest)
+                self.assertNotIn('.preview', manifest)
+                self.assertEqual((root / 'build/res/xml/shortcuts.xml').read_text(), (root / 'res/xml/shortcuts.xml').read_text())
         release.prepare_build(root, {})
-        self.assertNotIn('.preview', (root / 'build/AndroidManifest.xml').read_text())
         self.assertEqual(json.loads((root / 'build/assets/update-source.json').read_text())['repository'], '')
 
     def test_untrusted_build_metadata_is_rejected(self):
         root = self.android()
-        for changes in (dict(MYSERVER_VERSION_CODE='0'), dict(MYSERVER_VERSION_CODE='2100000001'), dict(MYSERVER_VERSION_CODE='1" injected="true'), dict(MYSERVER_UPDATE_REPOSITORY='example/project/../private'), dict(MYSERVER_UPDATE_CHANNEL='preview'), dict(MYSERVER_UPDATE_REPOSITORY='example/project', MYSERVER_UPDATE_BRANCH='feature/work', MYSERVER_UPDATE_COMMIT=SHA)):
+        for changes in (dict(MYSERVER_VERSION_CODE='0'), dict(MYSERVER_VERSION_CODE='2100000001'), dict(MYSERVER_VERSION_CODE='1" injected="true'), dict(MYSERVER_UPDATE_REPOSITORY='example/project/../private'), dict(MYSERVER_UPDATE_CHANNEL='preview'), dict(MYSERVER_UPDATE_REPOSITORY='example/project', MYSERVER_UPDATE_BRANCH='feature/work', MYSERVER_UPDATE_COMMIT='not-a-commit')):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 release.prepare_build(root, changes)
 
-    def test_release_tags_keep_branches_distinct_and_versions_orderable(self):
-        first = release.release_tag('preview', 'feature/inbox', 100123)
-        other = release.release_tag('preview', 'feature-inbox', 100123)
-        self.assertNotEqual(first, other)
-        self.assertRegex(first, r'^android-preview-[a-z0-9-]+-100123$')
-        self.assertEqual(release.release_tag('stable', 'main', 100124), 'android-stable-100124')
+    def test_release_tags_follow_global_run_numbers(self):
+        self.assertEqual(release.release_tag(100123), 'android-stable-100123')
+        self.assertEqual(release.release_tag(100124), 'android-stable-100124')
 
     def test_real_build_tools_badging_formats_and_signer(self):
         for spelling in ('minSdkVersion', 'sdkVersion'):
-            badging="package: name='app.thoughts.mobile.preview' versionCode='100123' versionName='1.2.0-preview.123' platformBuildVersionName='15'\n"+spelling+":'26'\n"
+            badging="package: name='app.thoughts.mobile' versionCode='100123' versionName='1.2.0+123' platformBuildVersionName='15'\n"+spelling+":'26'\n"
             signer='Signer #1 certificate SHA-256 digest: '+'B'*64+'\n'
             with patch.object(release, 'command', side_effect=[badging,signer]):
                 self.assertEqual(release.apk_metadata('/fixture.apk','/tools'),META)
@@ -93,11 +94,17 @@ class ReleaseChecks(unittest.TestCase):
         self.assertEqual(result['size'], apk.stat().st_size)
         self.assertEqual(result['sha256'], release.hashlib.sha256(apk.read_bytes()).hexdigest())
         self.assertTrue(result['apk_url'].endswith('/myserver.apk'))
-        self.assertTrue(result['release_url'].startswith('https://github.com/example/project/releases/tag/android-preview-'))
-        with patch.object(release, 'apk_metadata', return_value=dict(META, package_name='wrong.package')), patch.dict(os.environ, self.environment(), clear=True), self.assertRaises(ValueError):
-            release.create_manifest(apk, '/unused', SOURCE)
+        self.assertEqual(result['release_url'], 'https://github.com/example/project/releases/tag/android-stable-100123')
+        for package in ('wrong.package', 'app.thoughts.mobile.preview'):
+            with self.subTest(package=package), patch.object(release, 'apk_metadata', return_value=dict(META, package_name=package)), patch.dict(os.environ, self.environment(), clear=True), self.assertRaises(ValueError):
+                release.create_manifest(apk, '/unused', SOURCE)
         with self.assertRaises(ValueError):
             release.create_manifest(apk, '/unused', dict(SOURCE, commit='c' * 40))
+
+    def test_alternate_channel_cannot_be_published_with_matching_package(self):
+        source = dict(SOURCE, channel='preview')
+        with patch.object(release, 'apk_metadata', return_value=META), patch.dict(os.environ, self.environment(), clear=True), self.assertRaises(ValueError):
+            release.create_manifest(self.apk(source), '/unused', source)
 
     def test_pull_request_cannot_reach_release_or_signing_operations(self):
         with patch.dict(os.environ, dict(self.environment(), GITHUB_EVENT_NAME='pull_request'), clear=True), patch.object(release, 'remote_head') as head, self.assertRaises(ValueError):
@@ -117,8 +124,12 @@ class ReleaseChecks(unittest.TestCase):
                 seen.append(args)
                 if args[1:3] == ('release', 'create'):
                     self.assertIn('--draft', args)
+                    self.assertNotIn('--prerelease', args)
                     body = Path(args[args.index('--notes-file') + 1]).read_text()
-                    self.assertEqual(release.release_document(body)['commit'], SHA)
+                    document = release.release_document(body)
+                    self.assertEqual(document['commit'], SHA)
+                    self.assertEqual(document['branch'], 'feature/inbox')
+                    self.assertEqual(document['channel'], 'stable')
                 if args[1:3] == ('release', 'upload'):
                     update = json.loads(Path(args[5]).read_text())
                     self.assertEqual(update['version_code'], 100123)
@@ -127,7 +138,8 @@ class ReleaseChecks(unittest.TestCase):
             release.publish(apk, '/unused')
         self.assertEqual([args[2] for args in seen], ['create', 'upload', 'edit'])
         self.assertIn('--draft=false', seen[-1])
-        self.assertIn('--latest=false', seen[-1])
+        self.assertIn('--latest=true', seen[-1])
+        self.assertIn('--prerelease=false', seen[-1])
 
     def test_advanced_branch_during_upload_keeps_unpublished_draft(self):
         with patch.dict(os.environ, self.environment(), clear=True), patch.object(release, 'remote_head', side_effect=[SHA, 'd' * 40]), patch.object(release, 'apk_metadata', return_value=META), patch.object(release, 'existing_release', return_value=None), patch.object(release, 'command', return_value='') as command:

@@ -11,7 +11,6 @@ import org.json.*;
 public final class UpdateCatalog {
 
   public static final String STABLE_PACKAGE = "app.thoughts.mobile";
-  public static final String PREVIEW_PACKAGE = STABLE_PACKAGE + ".preview";
   public static final long MAX_APK = 128L * 1024 * 1024;
 
   public static final class Source {
@@ -20,7 +19,7 @@ public final class UpdateCatalog {
 
     public Source(String repository, String channel, String branch) {
       this.repository = repository;
-      this.channel = channel;
+      this.channel = "stable";
       this.branch = branch;
     }
 
@@ -32,16 +31,9 @@ public final class UpdateCatalog {
       android.content.SharedPreferences prefs = UpdateManager.preferences(
         context
       );
-      String channel = prefs.getString(
-        "channel",
-        build.optString(
-          "channel",
-          context.getPackageName().endsWith(".preview") ? "preview" : "stable"
-        )
-      );
       return new Source(
         prefs.getString("repository", build.optString("repository")),
-        channel,
+        "stable",
         prefs.getString("branch", build.optString("branch", "main"))
       );
     }
@@ -70,10 +62,8 @@ public final class UpdateCatalog {
       if (
         value.getInt("schema") != 1 ||
         !validRepository(repository) ||
-        !(channel.equals("stable") || channel.equals("preview")) ||
-        !packageName.equals(
-          channel.equals("stable") ? STABLE_PACKAGE : PREVIEW_PACKAGE
-        ) ||
+        !channel.equals("stable") ||
+        !packageName.equals(STABLE_PACKAGE) ||
         code < 1 ||
         code > Integer.MAX_VALUE ||
         size < 1 ||
@@ -102,7 +92,7 @@ public final class UpdateCatalog {
     }
 
     public String label() {
-      return version + (channel.equals("preview") ? " · " + branch : "");
+      return version + " · " + branch;
     }
   }
 
@@ -134,7 +124,7 @@ public final class UpdateCatalog {
       !result.repository.equalsIgnoreCase(repository) ||
       !tag.startsWith(prefix) ||
       !tag.matches("[A-Za-z0-9._-]+") ||
-      published.optBoolean("prerelease") != result.channel.equals("preview") ||
+      published.optBoolean("prerelease") ||
       !result.apkUrl.equals(
         "https://github.com/" +
           result.repository +
@@ -174,7 +164,7 @@ public final class UpdateCatalog {
     );
     List<Release> result = new ArrayList<>();
     Set<String> seen = new HashSet<>();
-    // Stable releases must remain discoverable even after many preview builds.
+    // Check latest and retain releases from every branch in the paginated catalog.
     try {
       String latest = get(
         "https://api.github.com/repos/" + repository + "/releases/latest"
@@ -186,7 +176,7 @@ public final class UpdateCatalog {
           seen.add(stable.apkUrl);
         }
       } catch (JSONException | IOException ignored) {
-        /* An unrelated latest release must not hide preview builds. */
+        /* An unrelated latest release must not hide other branches. */
       }
     } catch (NotFound ignored) {}
     for (int page = 1; page <= 5; page++) {
@@ -218,8 +208,7 @@ public final class UpdateCatalog {
       if (
         !value.repository.equalsIgnoreCase(source.repository) ||
         !value.channel.equals(source.channel) ||
-        (source.channel.equals("preview") &&
-          !value.branch.equals(source.branch))
+        !value.branch.equals(source.branch)
       ) continue;
       if (best == null || value.code > best.code) best = value;
     }

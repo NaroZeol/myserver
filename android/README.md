@@ -2,7 +2,7 @@
 
 [工具集与模块结构](../README.md) · [终端说明](TERMINAL.md) · [服务端](../server/README.md)
 
-Android 8.0+，当前版本 1.11.0。App 不预置服务器地址、用户名或凭据，安装后在服务器首页配置。application ID 为 `app.thoughts.mobile`。
+Android 8.0+。App 不预置服务器地址、用户名或凭据，安装后在服务器首页配置。application ID 为 `app.thoughts.mobile`。
 
 [收件箱](../docs/inbox.md) 接收系统分享的文字、链接和多文件，使用独立 SSH 传输队列，支持中断恢复及 APK 系统安装。文件传输使用 `dataSync` 前台服务，终端会话使用自己的 `specialUse` 服务，二者生命周期独立。
 
@@ -23,7 +23,7 @@ bash android/check-boundaries.sh
 
 安装包：`android/build/myserver.apk`。签名别名由 `MYSERVER_KEY_ALIAS` 注入，默认 `myserver`。当前发布证书为 `CN=myserver`，不包含个人名称、邮箱或服务器信息。构建目录已被 Git 忽略，私钥和密码文件不进入仓库。
 
-GitHub Actions 在 Android 10 / 15 测试全部通过后，使用长期渠道证书重新签署已测试 APK，并发布到 GitHub Releases。`main` 发布正式版，开发分支发布独立的 `.preview` 应用；PR 和测试任务不读取发布密钥。正式与预览分别配置签名 secrets，缺失时停止发布。环境变量、更新来源和发布协议见 [App 更新](../docs/app-updates.md)。
+GitHub Actions 在 Android 10 / 15 测试全部通过后，使用现有发布证书重新签署已测试 APK，并发布到 GitHub Releases。`main` 与开发分支均使用 `myserver` 名称和 `app.thoughts.mobile` 包名，可在 App 设置中选择更新分支并覆盖安装。CI 版本号跨分支递增，版本名为 Manifest 基础版本加构建编号，如 `1.12.0+123`。PR 和测试任务不读取发布密钥；缺少签名 secrets 时停止发布。环境变量、更新来源和发布协议见 [App 更新](../docs/app-updates.md)。
 
 本机参数可参考 [.env.example](.env.example)，复制到 `android/.env` 并填写后，显式加载：
 

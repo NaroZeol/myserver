@@ -5,6 +5,7 @@ import android.content.*;
 import android.content.pm.*;
 import android.net.Uri;
 import android.os.Build;
+import app.thoughts.mobile.InteractionChecks;
 import java.io.*;
 import java.util.*;
 import org.json.*;
@@ -100,14 +101,31 @@ public final class UpdateChecks {
             ? PackageManager.GET_SIGNING_CERTIFICATES
             : PackageManager.GET_SIGNATURES
         );
+      check(
+        app.packageName.equals(UpdateCatalog.STABLE_PACKAGE),
+        "All build branches must use the same installable package"
+      );
+      JSONObject build;
+      try (InputStream input = context.getAssets().open("update-source.json")) {
+        build = new JSONObject(UpdateCatalog.read(input, 8192));
+      }
+      prefs.edit().putString("channel", "preview").remove("branch").commit();
+      UpdateCatalog.Source inherited = UpdateCatalog.Source.load(context);
+      check(
+        inherited.channel.equals("stable") &&
+          inherited.branch.equals(build.getString("branch")),
+        "Old channel preferences must not override stable identity or the actual build branch"
+      );
+      prefs.edit().putString("branch", "feature/selected").commit();
+      check(
+        UpdateCatalog.Source.load(context).branch.equals("feature/selected"),
+        "Explicit update branch selection must persist across launches"
+      );
       File source = new File(context.getApplicationInfo().sourceDir);
       JSONObject value = new JSONObject()
         .put("schema", 1)
         .put("repository", "example/myserver")
-        .put(
-          "channel",
-          context.getPackageName().endsWith(".preview") ? "preview" : "stable"
-        )
+        .put("channel", "stable")
         .put("branch", "feature/inbox")
         .put("commit", String.join("", Collections.nCopies(40, "a")))
         .put(
@@ -176,25 +194,91 @@ public final class UpdateChecks {
       published(newerValue);
       UpdateCatalog.Release newer = new UpdateCatalog.Release(newerValue);
       UpdateCatalog.Release other = new UpdateCatalog.Release(
-        new JSONObject(newerValue.toString()).put("branch", "feature/other")
+        new JSONObject(newerValue.toString())
+          .put("branch", "feature/other")
+          .put("version_code", newer.code + 10)
+      );
+      UpdateCatalog.Release main = new UpdateCatalog.Release(
+        new JSONObject(newerValue.toString())
+          .put("branch", "main")
+          .put("version_code", newer.code + 5)
+      );
+      List<UpdateCatalog.Release> catalog = Arrays.asList(
+        other,
+        parsed,
+        main,
+        newer
       );
       check(
         UpdateCatalog.select(
-          Arrays.asList(parsed, other, newer),
+          catalog,
           new UpdateCatalog.Source(
             "example/myserver",
-            parsed.channel,
+            "stable",
             "feature/inbox"
           )
-        ).code == newer.code,
-        "Selected branch must get its newest build"
+        ) == newer,
+        "Selected development branch must get its newest build, even if another branch is newer"
       );
-      if (parsed.channel.equals("preview")) check(
+      check(
         UpdateCatalog.select(
-          Arrays.asList(parsed),
-          new UpdateCatalog.Source("example/myserver", "preview", "missing")
+          catalog,
+          new UpdateCatalog.Source("example/myserver", "stable", "main")
+        ) == main,
+        "Main must match its branch exactly instead of picking the highest global version"
+      );
+      check(
+        UpdateCatalog.select(
+          catalog,
+          new UpdateCatalog.Source(
+            "example/myserver",
+            "stable",
+            "feature/other"
+          )
+        ) == other,
+        "Changing branches must select the chosen branch within the same package"
+      );
+      check(
+        other.packageName.equals(parsed.packageName) &&
+          other.certificate.equals(parsed.certificate),
+        "Branch changes must retain package and signing identity"
+      );
+      check(
+        UpdateCatalog.select(
+          catalog,
+          new UpdateCatalog.Source("example/myserver", "stable", "missing")
         ) == null,
-        "Do not silently select another preview branch"
+        "A missing branch must never silently select another branch"
+      );
+      check(
+        newer.label().equals(newer.version + " · feature/inbox") &&
+          main.label().endsWith(" · main"),
+        "Every release label must identify its branch"
+      );
+      rejects(
+        () ->
+          new UpdateCatalog.Release(
+            new JSONObject(value.toString()).put("channel", "preview")
+          ),
+        "Legacy preview-channel metadata must be rejected"
+      );
+      rejects(
+        () ->
+          new UpdateCatalog.Release(
+            new JSONObject(value.toString()).put(
+              "package_name",
+              UpdateCatalog.STABLE_PACKAGE + ".preview"
+            )
+          ),
+        "Legacy preview packages must not be offered as updates"
+      );
+      rejects(
+        () ->
+          UpdateCatalog.parseRelease(
+            "example/myserver",
+            new JSONObject(release.toString()).put("prerelease", true)
+          ),
+        "Pre-releases must not enter the unified release catalog"
       );
       File apk = UpdateManager.file(context, parsed);
       check(
@@ -207,6 +291,10 @@ public final class UpdateChecks {
       );
       copy(source, apk);
       UpdateManager.verify(context, apk, parsed);
+      UpdateCatalog.Release crossBranch = new UpdateCatalog.Release(
+        new JSONObject(value.toString()).put("branch", "main")
+      );
+      UpdateManager.verify(context, apk, crossBranch);
       UpdateCatalog.Release wrongSigner = new UpdateCatalog.Release(
         new JSONObject(value.toString()).put(
           "certificate_sha256",
@@ -354,6 +442,22 @@ public final class UpdateChecks {
         !activity.isFinishing(),
         "Update settings must render without a server"
       );
+      UpdateActivity shown = activity;
+      test.runOnMainSync(() -> {
+        android.view.View root = shown.getWindow().getDecorView();
+        check(
+          InteractionChecks.find(root, "更新分支") != null,
+          "Update settings must expose the selected update branch"
+        );
+        check(
+          InteractionChecks.find(root, "渠道") == null &&
+            InteractionChecks.find(root, "更新渠道") == null &&
+            InteractionChecks.find(root, "开发分支") == null,
+          "Unified package settings must not retain preview-channel controls"
+        );
+      });
+      test.waitForIdleSync();
+      Thread.sleep(250);
       android.graphics.Bitmap bitmap = test.getUiAutomation().takeScreenshot();
       if (bitmap != null) {
         File folder = new File(

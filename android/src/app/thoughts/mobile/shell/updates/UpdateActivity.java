@@ -127,29 +127,10 @@ public final class UpdateActivity extends Activity implements Feature.Host {
     } catch (Exception ignored) {}
     content.addView(ui.text(current, 32, Ui.INK));
     ui.space(content, 8);
-    content.addView(
-      ui.text(
-        getPackageName().endsWith(".preview")
-          ? "已安装 · 预览版"
-          : "已安装 · 正式版",
-        13,
-        Ui.MUTED
-      )
-    );
+    content.addView(ui.text("已安装", 13, Ui.MUTED));
     UpdateCatalog.Source source = UpdateCatalog.Source.load(this);
-    LinearLayout channels = ui.card(content, "更新渠道", "");
-    ui.setting(
-      channels,
-      "渠道",
-      source.channel.equals("preview") ? "预览版" : "正式版",
-      this::chooseChannel
-    );
-    if (source.channel.equals("preview")) ui.setting(
-      channels,
-      "开发分支",
-      source.branch,
-      this::chooseBranch
-    );
+    LinearLayout updates = ui.card(content, "", "");
+    ui.setting(updates, "更新分支", source.branch, this::chooseBranch);
     UpdateCatalog.Release latest = UpdateManager.selected(this),
       pending = UpdateManager.pending(this);
     String downloadState = UpdateManager.preferences(this).getString(
@@ -219,25 +200,7 @@ public final class UpdateActivity extends Activity implements Feature.Host {
           Ui.MUTED
         )
       );
-      else update.addView(
-        ui.button(
-          "下载更新",
-          () -> {
-            if (
-              !latest.packageName.equals(getPackageName())
-            ) new AlertDialog.Builder(this)
-              .setTitle(
-                "安装" + (latest.channel.equals("stable") ? "正式版" : "预览版")
-              )
-              .setMessage("两个版本独立安装，当前数据不会自动迁移。")
-              .setNegativeButton("取消", null)
-              .setPositiveButton("下载", (d, w) -> download(latest))
-              .show();
-            else download(latest);
-          },
-          true
-        )
-      );
+      else update.addView(ui.button("下载更新", () -> download(latest), true));
     } else {
       progress = null;
       update.addView(
@@ -248,9 +211,7 @@ public final class UpdateActivity extends Activity implements Feature.Host {
               ? "请先设置发布仓库"
               : UpdateManager.preferences(this).getLong("checked", 0) == 0
                 ? "检查可用版本"
-                : source.channel.equals("preview")
-                  ? "此分支尚无可用预览版"
-                  : "暂无正式版",
+                : "此分支尚无可用版本",
           14,
           Ui.MUTED
         )
@@ -313,35 +274,13 @@ public final class UpdateActivity extends Activity implements Feature.Host {
     }
   }
 
-  private void chooseChannel() {
-    UpdateCatalog.Source source = UpdateCatalog.Source.load(this);
-    new AlertDialog.Builder(this)
-      .setTitle("更新渠道")
-      .setSingleChoiceItems(
-        new String[] { "正式版", "预览版" },
-        source.channel.equals("stable") ? 0 : 1,
-        (d, which) -> {
-          UpdateManager.cancel(this);
-          UpdateManager.preferences(this)
-            .edit()
-            .putString("channel", which == 0 ? "stable" : "preview")
-            .apply();
-          d.dismiss();
-          render();
-          UpdateManager.check(this, this::render);
-        }
-      )
-      .setNegativeButton("取消", null)
-      .show();
-  }
-
   private void chooseBranch() {
     Set<String> values = new LinkedHashSet<>();
     for (UpdateCatalog.Release release : UpdateManager.cached(this))
-      if (release.channel.equals("preview")) values.add(release.branch);
+      values.add(release.branch);
     if (values.isEmpty()) {
       UpdateManager.check(this, this::render);
-      status("正在获取开发分支");
+      status("正在获取更新分支");
       return;
     }
     String[] branches = values.toArray(new String[0]);
@@ -349,8 +288,12 @@ public final class UpdateActivity extends Activity implements Feature.Host {
       UpdateCatalog.Source.load(this).branch
     );
     new AlertDialog.Builder(this)
-      .setTitle("开发分支")
+      .setTitle("更新分支")
       .setSingleChoiceItems(branches, selected, (d, which) -> {
+        if (which == selected) {
+          d.dismiss();
+          return;
+        }
         UpdateManager.cancel(this);
         UpdateManager.preferences(this)
           .edit()

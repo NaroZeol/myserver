@@ -96,14 +96,7 @@ jobs:
           printf '%s' 'android-ci-only' > "$RUNNER_TEMP/signing-password"
           keytool -genkeypair -keystore "$RUNNER_TEMP/myserver.jks" -storepass:file "$RUNNER_TEMP/signing-password" -alias "$MYSERVER_KEY_ALIAS" -keyalg RSA -keysize 3072 -validity 30 -dname 'CN=myserver CI Test'
           base_version=$(python3 -c 'import xml.etree.ElementTree as E; print(E.parse("android/AndroidManifest.xml").getroot().attrib["{http://schemas.android.com/apk/res/android}versionName"])')
-          if [[ "$GITHUB_REF" == 'refs/heads/main' && "$GITHUB_EVENT_NAME" != 'pull_request' ]]; then
-            echo 'MYSERVER_UPDATE_CHANNEL=stable' >> "$GITHUB_ENV"
-            echo "MYSERVER_VERSION_NAME=$base_version" >> "$GITHUB_ENV"
-          else
-            echo 'MYSERVER_PREVIEW=1' >> "$GITHUB_ENV"
-            echo 'MYSERVER_UPDATE_CHANNEL=preview' >> "$GITHUB_ENV"
-            echo "MYSERVER_VERSION_NAME=$base_version-preview.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
-          fi
+          echo "MYSERVER_VERSION_NAME=$base_version+$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
           echo "MYSERVER_VERSION_CODE=$((100000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
           echo "MYSERVER_UPDATE_REPOSITORY=$GITHUB_REPOSITORY" >> "$GITHUB_ENV"
           echo "MYSERVER_UPDATE_BRANCH=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
@@ -179,28 +172,28 @@ jobs:
         with:
           name: myserver-android-tested-api35
           path: android/build/tested
-      - name: Sign the tested APK with the persistent channel certificate
+      - name: Sign the tested APK with the existing release certificate
         env:
-          KEYSTORE_BASE64: ${{ github.ref == 'refs/heads/main' && secrets.MYSERVER_KEYSTORE_BASE64 || (github.ref != 'refs/heads/main' && secrets.MYSERVER_PREVIEW_KEYSTORE_BASE64 || '') }}
-          KEYSTORE_PASSWORD: ${{ github.ref == 'refs/heads/main' && secrets.MYSERVER_KEYSTORE_PASSWORD || (github.ref != 'refs/heads/main' && secrets.MYSERVER_PREVIEW_KEYSTORE_PASSWORD || '') }}
-          KEY_ALIAS: ${{ github.ref == 'refs/heads/main' && (vars.MYSERVER_KEY_ALIAS || 'myserver') || (vars.MYSERVER_PREVIEW_KEY_ALIAS || 'myserver-preview') }}
+          KEYSTORE_BASE64: ${{ secrets.MYSERVER_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.MYSERVER_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ vars.MYSERVER_KEY_ALIAS || 'myserver' }}
         shell: bash
         run: |
           set -euo pipefail
           umask 077
           if [[ -z "$KEYSTORE_BASE64" || -z "$KEYSTORE_PASSWORD" ]]; then
-            echo 'Persistent signing secrets for this channel are required; no temporary-key update will be published.' >&2
+            echo 'Existing release signing secrets are required; no temporary-key update will be published.' >&2
             exit 1
           fi
-          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/channel.jks"
-          printf '%s' "$KEYSTORE_PASSWORD" > "$RUNNER_TEMP/channel-password"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          printf '%s' "$KEYSTORE_PASSWORD" > "$RUNNER_TEMP/release-password"
           mkdir -p android/build/publish
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks "$RUNNER_TEMP/channel.jks" --ks-key-alias "$KEY_ALIAS" --ks-pass "file:$RUNNER_TEMP/channel-password" --out android/build/publish/myserver.apk android/build/tested/myserver.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" --ks-pass "file:$RUNNER_TEMP/release-password" --out android/build/publish/myserver.apk android/build/tested/myserver.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose android/build/publish/myserver.apk
       - name: Publish a complete update only while this commit is still the branch head
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 android/release.py publish --apk android/build/publish/myserver.apk --build-tools "$ANDROID_HOME/build-tools/35.0.0"
-      - name: Remove channel signing material
+      - name: Remove release signing material
         if: always()
-        run: rm -f "$RUNNER_TEMP/channel.jks" "$RUNNER_TEMP/channel-password"
+        run: rm -f "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/release-password"
