@@ -310,3 +310,87 @@ def test_bundle_source_failure_cannot_finalize_a_valid_truncated_archive(web,dat
     assert len(opened)==2 and all(handle.closed for handle in opened)
     with pytest.raises(zipfile.BadZipFile):zipfile.ZipFile(io.BytesIO(raw))
     assert b'PK\x05\x06' not in raw  # No end-of-central-directory success marker.
+
+
+def preview_fixture(database,name,mime,content):
+    from test_inbox import call,upload,commit
+    data=manifest(content);data['files'][0].update(name=name,mime=mime)
+    assert call(database,'/inbox/uploads','POST',data)['status']==201
+    upload(database,data,0,content);commit(database,data)
+    return '/api/preview/'+data['id']+'/'+data['files'][0]['id']
+
+
+def small_png(width=1,height=1):
+    import struct
+    import zlib
+    def chunk(kind,data):return struct.pack('>I',len(data))+kind+data+struct.pack('>I',zlib.crc32(kind+data)&0xffffffff)
+    return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',width,height,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(b'\x00\xff\x88\x22\xff'))+chunk(b'IEND',b'')
+
+
+def test_authenticated_raster_preview_uses_signature_and_is_sandboxed(web,database):
+    server,request=web;auth=login(server,request)
+    png=small_png();path=preview_fixture(database,'photo.png','image/png',png)
+    assert request(path)[0]==401
+    status,headers,raw=request(path,headers=auth)
+    assert status==200 and raw==png
+    assert headers['Content-Type']=='image/png'
+    assert headers['Content-Disposition'].startswith('inline;')
+    assert headers['X-Content-Type-Options']=='nosniff'
+    assert 'sandbox' in headers['Content-Security-Policy']
+    assert "default-src 'none'" in headers['Content-Security-Policy']
+    assert headers['Cross-Origin-Resource-Policy']=='same-origin'
+    assert headers['Cache-Control']=='no-store'
+    assert request(path,headers={**auth,'Range':'bytes=0-7'})[2]==png[:8]
+
+
+def test_spoofed_images_pdf_and_excessive_dimensions_are_not_rendered(web,database):
+    server,request=web;auth=login(server,request)
+    html=b'<html><script>window.pwned=1</script></html>'
+    path=preview_fixture(database,'attack.png','image/png',html)
+    assert request(path,headers=auth)[0]==415
+    pdf=preview_fixture(database,'document.pdf','application/pdf',b'%PDF-1.4')
+    assert request(pdf,headers=auth)[0]==415
+    giant=preview_fixture(database,'giant.png','image/png',small_png(100000,100000))
+    assert request(giant,headers=auth)[0]==413
+
+
+@pytest.mark.parametrize('name,mime,content',[
+    ('page.html','text/html',b'<script>window.pwned=1</script>'),
+    ('image.svg','image/svg+xml',b'<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>'),
+    ('script.js','application/javascript',b'fetch("/api/inbox").then(alert)'),
+])
+def test_active_document_previews_are_only_utf8_plain_text(web,database,name,mime,content):
+    server,request=web;auth=login(server,request)
+    status,headers,body=request(preview_fixture(database,name,mime,content),headers=auth)
+    assert status==200 and body==content
+    assert headers['Content-Type']=='text/plain; charset=utf-8'
+    assert headers['Content-Disposition']=='inline'
+    assert 'sandbox' in headers['Content-Security-Policy']
+    assert 'script-src' not in headers['Content-Security-Policy']
+
+
+def test_text_size_encoding_and_binary_content_limits(web,database):
+    server,request=web;auth=login(server,request)
+    large=preview_fixture(database,'large.txt','text/plain',b'x'*(1024**2+1))
+    assert request(large,headers=auth)[0]==413
+    binary=preview_fixture(database,'binary.txt','text/plain',b'hello\x00world')
+    assert request(binary,headers=auth)[0]==415
+    invalid=preview_fixture(database,'invalid.txt','text/plain',b'hello\xff')
+    assert request(invalid,headers=auth)[0]==415
+
+
+def test_audio_preview_supports_range_and_media_is_allowed_by_page_csp(web,database):
+    import io
+    import wave
+    server,request=web;auth=login(server,request)
+    source=io.BytesIO()
+    with wave.open(source,'wb') as output:
+        output.setnchannels(1);output.setsampwidth(1);output.setframerate(8000);output.writeframes(b'\x80'*32)
+    content=source.getvalue();path=preview_fixture(database,'recording.wav','audio/wav',content)
+    status,headers,raw=request(path,headers={**auth,'Range':'bytes=10-19'})
+    assert status==206 and raw==content[10:20]
+    assert headers['Content-Type']=='audio/wav' and headers['Content-Range']==f'bytes 10-19/{len(content)}'
+    page=request('/')[1]
+    assert "media-src 'self'" in page['Content-Security-Policy']
+    bad=preview_fixture(database,'fake.mp4','video/mp4',b'<script>alert(1)</script>')
+    assert request(bad,headers=auth)[0]==415

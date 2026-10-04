@@ -268,20 +268,32 @@ try {
       tasks.length === 0 &&
       document.querySelectorAll("article.item").length === 3,
   );
-  assert.equal(await page.locator("#items img,#items script").count(), 0);
+  assert.equal(await page.locator("#items script").count(), 0);
   assert.equal(await page.evaluate(() => window.fixtureInjected), undefined);
   const card = page
     .locator("article.item")
     .filter({ hasText: "桌面验证已完成" });
-  assert.equal(await card.locator(".file-link").count(), 3);
+  assert.equal(await card.locator(".file-tile").count(), 3);
+  await card.locator(".file-tile").first().click();
+  await page.locator("#viewer").waitFor({ state: "visible" });
   const downloadPromise = page.waitForEvent("download");
-  await card.locator(".file-link").first().click();
+  await page.locator("#viewer-download").click();
   const download = await downloadPromise;
   assert.equal(download.suggestedFilename(), "测试材料.bin");
   assert.equal(
     (await readFile(await download.path())).toString(),
     "private fixture bytes",
   );
+  await page.locator("#viewer-close").click();
+  await card.locator(".file-tile").nth(2).click();
+  await page.waitForFunction(
+    () =>
+      document.querySelector("#viewer-content pre")?.textContent ===
+      "safe text",
+  );
+  assert.equal(await page.locator("#viewer script,#viewer iframe").count(), 0);
+  await page.locator("#viewer-close").click();
+  await card.locator(".item-more summary").click();
   await card.getByRole("button", { name: "编辑", exact: true }).click();
   await page.locator("#edit-title").fill("本周测试材料");
   await page.locator("#edit-note").fill("保留这组文件，稍后在手机继续。");
@@ -290,11 +302,12 @@ try {
     () =>
       document.querySelector("article.item h2")?.textContent === "本周测试材料",
   );
+  await page.locator("#selection-toggle").click();
   await page.locator("#select-loaded").check();
   assert.equal(await page.locator(".item-checkbox:checked").count(), 3);
   assert.equal(
     await page.locator("#selection-count").textContent(),
-    "已选 3 条收件",
+    "已选 3 条",
   );
   const bundlePromise = page.waitForEvent("download");
   await page.locator("#download-selected").click();
@@ -328,12 +341,65 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
   assert.equal(await page.locator("#download-selected").isDisabled(), true);
   await page.locator("#search").fill("nothing-matches-fixture");
   await page.waitForFunction(() =>
-    document.querySelector("#items").textContent.includes("没有找到"),
+    document.querySelector("#items").textContent.includes("没有匹配"),
   );
   await page.locator("#search").fill("");
   await page.waitForFunction(
     () => document.querySelectorAll("article.item").length === 3,
   );
+  await page.locator("#selection-toggle").click();
+  await page
+    .locator("#files")
+    .setInputFiles([
+      {
+        name: "草稿配图.png",
+        mimeType: "image/png",
+        buffer: Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aB9sAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      },
+    ]);
+  await page.locator("#send").click();
+  await page.waitForFunction(
+    () =>
+      tasks.length === 0 &&
+      document.querySelectorAll("article.item").length === 4,
+  );
+  await page.locator("#type-filter").selectOption("image");
+  await page.waitForFunction(
+    () =>
+      document.querySelectorAll("article.item").length === 1 &&
+      document.querySelector(".image-tile img")?.naturalWidth > 0,
+  );
+  await page.locator(".image-tile").click();
+  await page.waitForFunction(
+    () => document.querySelector("#viewer img")?.naturalWidth > 0,
+  );
+  await page.locator("#viewer-close").click();
+  await page.locator("#filter-toggle").click();
+  await page.locator("#source-filter").selectOption("server");
+  await page.waitForFunction(
+    () => document.querySelectorAll("article.item").length === 0,
+  );
+  await page.locator("#source-filter").selectOption("computer");
+  await page.waitForFunction(
+    () => document.querySelectorAll("article.item").length === 1,
+  );
+  await page.locator("#reset-filters").click();
+  await page.waitForFunction(
+    () => document.querySelectorAll("article.item").length === 4,
+  );
+  await page.locator("#sort-filter").selectOption("size");
+  await page.waitForFunction(
+    () => document.querySelector("article.item h2")?.textContent === "same.bin",
+  );
+  await page.locator("#sort-filter").selectOption("newest");
+  await page.waitForFunction(
+    () =>
+      document.querySelector("article.item h2")?.textContent === "草稿配图.png",
+  );
+  await page.locator("#filter-toggle").click();
   await page.screenshot({
     path: resolve(screenshots, "inbox-desktop.png"),
     fullPage: true,
@@ -350,9 +416,17 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     fullPage: true,
   });
   page.once("dialog", (dialog) => dialog.accept());
+  await card.locator(".item-more summary").click();
   await card.getByRole("button", { name: "删除", exact: true }).click();
   await page.waitForFunction(
-    () => document.querySelectorAll("article.item").length === 2,
+    () => document.querySelectorAll("article.item").length === 3,
+  );
+  await page.locator("#selection-toggle").click();
+  await page.locator("#select-loaded").check();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#delete-selected").click();
+  await page.waitForFunction(
+    () => document.querySelectorAll("article.item").length === 0,
   );
   await page.locator("#logout").click();
   await page.locator("#login").waitFor({ state: "visible" });
@@ -362,7 +436,7 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
   );
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser token login, private multi-file upload, cross-refresh resume integrity, individual and batch ZIP downloads, edit/search/delete, logout and responsive layout",
+    "PASS: browser token login, multi-file upload and resume integrity, image/text previews, type/source/sort filters, ZIP downloads, edit/search/batch delete, logout and responsive layout",
   );
 } finally {
   if (browser) await browser.close();

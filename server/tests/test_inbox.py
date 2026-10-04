@@ -248,7 +248,7 @@ def test_category_filter_happens_before_pagination(database):
     files=call(database,'/inbox?type=files&limit=1')['body']
     assert len(files['items'])==1 and files['has_more']
     assert {row['id'] for row in call(database,'/inbox?type=text')['body']['items']}=={mixed['id'],text['id']}
-    assert call(database,'/inbox?type=other')['status']==400
+    assert call(database,'/inbox?type=unknown')['status']==400
 
 
 def test_cli_put_validates_title_before_creation_and_never_overwrites_download(database,tmp_path):
@@ -271,3 +271,58 @@ def test_cli_put_validates_title_before_creation_and_never_overwrites_download(d
     assert run('get',item['id'],'--output',destination).returncode==1
     assert destination.read_bytes()==b'keep this file'
     listing=run('list','--json');assert json.loads(listing.stdout)['items']==[item]
+
+
+def test_filtering_source_time_type_and_sort_precedes_pagination(database):
+    from datetime import datetime,timezone
+    fixtures=[
+        ('z-photo.png','image/png',b'123','Android','2026-09-30T08:00:00.000+00:00'),
+        ('a-photo.jpg','application/octet-stream',b'12345','app','2026-09-29T08:00:00.000+00:00'),
+        ('b-photo.webp','image/webp',b'1234','browser','2026-09-30T08:00:00.000+00:00'),
+        ('old.png','image/png',b'12345678','Android','2026-08-01T08:00:00.000+00:00'),
+        ('report.pdf','application/pdf',b'12','server','2026-09-29T08:00:00.000+00:00'),
+        ('package.apk','application/zip',b'1','Android','2026-09-30T08:00:00.000+00:00'),
+    ]
+    identifiers=[]
+    for name,mime,content,source,created in fixtures:
+        data=manifest(content);data['source']=source;data['files'][0].update(name=name,mime=mime)
+        call(database,'/inbox/uploads','POST',data);upload(database,data,0,content);commit(database,data)
+        with connect(database) as connection:
+            with connection:connection.execute('UPDATE inbox_items SET created_at=? WHERE id=?',(created,data['id']))
+        identifiers.append(data['id'])
+    since=int(datetime(2026,9,1,tzinfo=timezone.utc).timestamp())
+    query='/inbox?type=image&source=phone&since='+str(since)+'&sort=name&limit=1'
+    first=call(database,query)['body'];second=call(database,query+'&offset=1')['body']
+    assert [first['items'][0]['id'],second['items'][0]['id']]==[identifiers[1],identifiers[0]]
+    assert first['has_more'] and not second['has_more']
+    assert first['items'][0]['files'][0]['kind']=='image'
+    assert first['items'][0]['source_kind']=='phone'
+    assert first['items'][0]['total_size']==5
+    size=call(database,'/inbox?type=image&sort=size')['body']['items']
+    assert [item['total_size'] for item in size]==[8,5,4,3]
+    assert call(database,'/inbox?type=apk')['body']['items'][0]['id']==identifiers[5]
+    assert call(database,'/inbox?source=computer')['body']['items'][0]['id']==identifiers[2]
+    oldest=call(database,'/inbox?sort=oldest')['body']['items']
+    assert oldest[0]['id']==identifiers[3]
+    newest=call(database,'/inbox?sort=newest')['body']['items']
+    assert [item['id'] for item in newest]==[item['id'] for item in reversed(oldest)]
+
+
+@pytest.mark.parametrize('query',['source=unknown','sort=unknown','since=-1','since=253402300800','since=not-a-number','type=unknown'])
+def test_invalid_filter_values_are_rejected(database,query):
+    assert call(database,'/inbox?'+query)['status']==400
+
+
+def test_metadata_classifies_common_files_and_bounds_preview_candidates():
+    assert inbox.file_kind('application/octet-stream','photo.HEIC')=='image'
+    assert inbox.file_kind('application/zip','report.docx')=='document'
+    assert inbox.file_kind('application/zip','app.apk')=='apk'
+    assert inbox.file_kind('application/octet-stream','backup.tar.gz')=='archive'
+    assert inbox.file_kind('application/octet-stream','movie.mp4')=='video'
+    assert inbox.file_kind('audio/flac','recording')=='audio'
+    assert inbox.file_kind('application/octet-stream','opaque.bin')=='other'
+    assert inbox.preview_kind('image/svg+xml','image.svg',100)=='text'
+    assert inbox.preview_kind('text/html','page.html',100)=='text'
+    assert inbox.preview_kind('application/pdf','document.pdf',100) is None
+    assert inbox.preview_kind('image/png','image.png',21*1024**2) is None
+    assert inbox.preview_kind('text/plain','large.txt',1024**2+1) is None

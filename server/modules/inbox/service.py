@@ -1,5 +1,6 @@
 """Inbox metadata and bounded file storage; filenames never become disk paths."""
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
@@ -145,12 +146,73 @@ def item_row(connection, item_id, ready=False):
     return row
 
 
+FILE_EXTENSIONS = {
+    'image': {'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'avif', 'heic', 'heif', 'svg'},
+    'video': {'mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v', '3gp', 'ogv'},
+    'audio': {'mp3', 'wav', 'ogg', 'oga', 'opus', 'flac', 'm4a', 'aac'},
+    'document': {'pdf', 'txt', 'md', 'csv', 'tsv', 'json', 'yaml', 'yml', 'xml', 'html', 'htm', 'rtf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'epub', 'py', 'java', 'kt', 'c', 'h', 'cpp', 'css', 'js', 'ts', 'sh', 'sql', 'toml', 'ini', 'conf', 'log'},
+    'archive': {'zip', 'tar', 'gz', 'bz2', 'xz', '7z', 'rar', 'tgz', 'zst'},
+    'apk': {'apk', 'apks', 'xapk'},
+}
+TEXT_EXTENSIONS = {'txt', 'md', 'csv', 'tsv', 'json', 'yaml', 'yml', 'xml', 'html', 'htm', 'svg', 'py', 'java', 'kt', 'c', 'h', 'cpp', 'css', 'js', 'ts', 'sh', 'sql', 'toml', 'ini', 'conf', 'log'}
+PREVIEW_LIMITS = {'image': 20 * 1024**2, 'video': 256 * 1024**2, 'audio': 256 * 1024**2, 'text': 1024**2}
+
+
+def file_kind(mime, name):
+    extension = name.rsplit('.', 1)[-1].lower() if '.' in name else ''
+    for kind, extensions in FILE_EXTENSIONS.items():
+        if extension in extensions:
+            return kind
+    mime = mime.lower()
+    for kind in ('image', 'video', 'audio'):
+        if mime.startswith(kind + '/'):
+            return kind
+    if mime == 'application/vnd.android.package-archive':
+        return 'apk'
+    if mime in ('application/zip', 'application/x-tar', 'application/gzip', 'application/x-7z-compressed', 'application/vnd.rar', 'application/x-rar-compressed'):
+        return 'archive'
+    if mime.startswith('text/') or mime in ('application/pdf', 'application/json', 'application/xml', 'application/rtf', 'application/msword', 'application/epub+zip') or 'officedocument' in mime or 'opendocument' in mime:
+        return 'document'
+    return 'other'
+
+
+def preview_kind(mime, name, size):
+    extension = name.rsplit('.', 1)[-1].lower() if '.' in name else ''
+    mime = mime.lower()
+    candidate = None
+    if extension in TEXT_EXTENSIONS or mime.startswith('text/') or mime in ('application/json', 'application/xml', 'application/javascript', 'image/svg+xml'):
+        candidate = 'text'
+    elif extension in ('jpg', 'jpeg', 'png', 'gif', 'webp') or mime in ('image/jpeg', 'image/png', 'image/gif', 'image/webp'):
+        candidate = 'image'
+    elif extension in ('mp4', 'webm', 'm4v', 'ogv') or mime in ('video/mp4', 'video/webm', 'video/ogg'):
+        candidate = 'video'
+    elif extension in ('mp3', 'wav', 'ogg', 'oga', 'opus', 'flac', 'm4a') or mime in ('audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/flac', 'audio/mp4', 'audio/webm'):
+        candidate = 'audio'
+    return candidate if candidate and size <= PREVIEW_LIMITS[candidate] else None
+
+
+def source_kind(source):
+    value = source.strip().lower()
+    if value in ('android', 'app', 'phone', 'mobile', '手机'):
+        return 'phone'
+    if value in ('browser', 'desktop', 'computer', 'pc', '电脑'):
+        return 'computer'
+    if value in ('server', 'cli', '服务器'):
+        return 'server'
+    return 'other'
+
+
 def files(connection, item_id):
-    return [dict(row) for row in connection.execute('SELECT id,name,mime,size,sha256 FROM inbox_files WHERE item_id=? ORDER BY position', (item_id,))]
+    result = [dict(row) for row in connection.execute('SELECT id,name,mime,size,sha256 FROM inbox_files WHERE item_id=? ORDER BY position', (item_id,))]
+    for entry in result:
+        entry['kind'] = file_kind(entry['mime'], entry['name'])
+        entry['preview'] = preview_kind(entry['mime'], entry['name'], entry['size'])
+    return result
 
 
 def serialize(connection, row):
-    return {**{key: row[key] for key in ('id', 'title', 'text', 'note', 'source', 'created_at')}, 'files': files(connection, row['id'])}
+    attachments = files(connection, row['id'])
+    return {**{key: row[key] for key in ('id', 'title', 'text', 'note', 'source', 'created_at')}, 'files': attachments, 'total_size': sum(entry['size'] for entry in attachments), 'source_kind': source_kind(row['source'])}
 
 
 def listing(connection, request):
@@ -158,10 +220,38 @@ def listing(connection, request):
     offset = max(0, min(2**63 - 1, int(request.query.get('offset', 0))))
     query = request.query.get('q', '')[:200].strip()
     kind = request.query.get('type', 'all')
-    if kind not in ('all', 'files', 'text'):
+    source = request.query.get('source', 'all')
+    sort = request.query.get('sort', 'newest')
+    if kind not in ('all', 'files', 'text', 'other', *FILE_EXTENSIONS):
         raise RpcError('收件类型无效')
-    condition = {'all': '1', 'files': 'EXISTS(SELECT 1 FROM inbox_files f WHERE f.item_id=inbox_items.id)', 'text': "length(trim(text,' '||char(9)||char(10)||char(13)))>0"}[kind]
-    rows = connection.execute("SELECT * FROM inbox_items WHERE state='ready' AND " + condition + " AND (?='' OR instr(lower(title||' '||text||' '||note),lower(?))>0 OR EXISTS(SELECT 1 FROM inbox_files f WHERE f.item_id=inbox_items.id AND instr(lower(f.name),lower(?))>0)) ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?", (query, query, query, limit + 1, offset)).fetchall()
+    if source not in ('all', 'phone', 'computer', 'server', 'other'):
+        raise RpcError('来源筛选无效')
+    orders = {'newest': 'created_at DESC,id DESC', 'oldest': 'created_at ASC,id ASC', 'name': 'lower(title) ASC,id ASC', 'size': 'total_size DESC,id DESC'}
+    if sort not in orders:
+        raise RpcError('排序方式无效')
+    connection.create_function('inbox_file_kind', 2, file_kind, deterministic=True)
+    connection.create_function('inbox_source_kind', 1, source_kind, deterministic=True)
+    conditions, params = ["state='ready'"], []
+    if kind == 'files':
+        conditions.append('EXISTS(SELECT 1 FROM inbox_files f WHERE f.item_id=inbox_items.id)')
+    elif kind == 'text':
+        conditions.append("length(trim(text,' '||char(9)||char(10)||char(13)))>0")
+    elif kind != 'all':
+        conditions.append('EXISTS(SELECT 1 FROM inbox_files f WHERE f.item_id=inbox_items.id AND inbox_file_kind(f.mime,f.name)=?)')
+        params.append(kind)
+    if source != 'all':
+        conditions.append('inbox_source_kind(source)=?')
+        params.append(source)
+    since = int(request.query.get('since', 0))
+    if not 0 <= since <= 253402300799:
+        raise RpcError('时间筛选无效')
+    if since:
+        conditions.append('created_at>=?')
+        params.append(datetime.fromtimestamp(since, timezone.utc).isoformat(timespec='milliseconds'))
+    if query:
+        conditions.append("(instr(lower(title||' '||text||' '||note),lower(?))>0 OR EXISTS(SELECT 1 FROM inbox_files f WHERE f.item_id=inbox_items.id AND instr(lower(f.name),lower(?))>0))")
+        params.extend((query, query))
+    rows = connection.execute("SELECT *,coalesce((SELECT sum(size) FROM inbox_files f WHERE f.item_id=inbox_items.id),0) AS total_size FROM inbox_items WHERE " + ' AND '.join(conditions) + ' ORDER BY ' + orders[sort] + ' LIMIT ? OFFSET ?', params + [limit + 1, offset]).fetchall()
     return Reply(dict(items=[serialize(connection, row) for row in rows[:limit]], has_more=len(rows) > limit, next_offset=offset + limit, storage=dict(used_bytes=usage(connection), quota_bytes=quota(request.database))))
 
 

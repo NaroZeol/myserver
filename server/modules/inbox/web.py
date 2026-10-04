@@ -19,11 +19,93 @@ from urllib.parse import parse_qs, quote, urlsplit
 from database import connect
 from rpc import RpcError
 from .cli import call, operation
-from .service import MAX_CHUNK, files, ident, item_row, locked, transfer
+from .service import MAX_CHUNK, PREVIEW_LIMITS, files, ident, item_row, locked, transfer, preview_kind
 
 STATIC = Path(__file__).with_name('web')
 REQUEST_SECONDS = 90
 BODY_IDLE_SECONDS = 5
+PREVIEW_CSP = "default-src 'none'; sandbox; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+MAX_IMAGE_PIXELS = 40_000_000
+
+
+def raster_dimensions(head):
+    if head.startswith(b'\x89PNG\r\n\x1a\n') and len(head) >= 24 and head[12:16] == b'IHDR':
+        return 'image/png', int.from_bytes(head[16:20], 'big'), int.from_bytes(head[20:24], 'big')
+    if head[:6] in (b'GIF87a', b'GIF89a') and len(head) >= 10:
+        return 'image/gif', int.from_bytes(head[6:8], 'little'), int.from_bytes(head[8:10], 'little')
+    if head.startswith(b'RIFF') and head[8:12] == b'WEBP' and len(head) >= 30:
+        if head[12:16] == b'VP8X':
+            return 'image/webp', 1 + int.from_bytes(head[24:27], 'little'), 1 + int.from_bytes(head[27:30], 'little')
+        if head[12:16] == b'VP8L' and head[20] == 0x2f:
+            bits = int.from_bytes(head[21:25], 'little')
+            return 'image/webp', 1 + (bits & 0x3fff), 1 + ((bits >> 14) & 0x3fff)
+        if head[12:16] == b'VP8 ' and head[23:26] == b'\x9d\x01\x2a':
+            return 'image/webp', int.from_bytes(head[26:28], 'little') & 0x3fff, int.from_bytes(head[28:30], 'little') & 0x3fff
+    if head.startswith(b'\xff\xd8\xff'):
+        position = 2
+        while position < len(head) and head[position] == 0xff:
+            while position < len(head) and head[position] == 0xff:
+                position += 1
+            if position >= len(head):
+                break
+            marker = head[position]; position += 1
+            if marker in (0xd9, 0xda):
+                break
+            if marker == 1 or 0xd0 <= marker <= 0xd8:
+                continue
+            if position + 2 > len(head):
+                break
+            length = int.from_bytes(head[position:position + 2], 'big')
+            if length < 2 or position + length > len(head):
+                break
+            if marker in (0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf) and length >= 8:
+                return 'image/jpeg', int.from_bytes(head[position + 5:position + 7], 'big'), int.from_bytes(head[position + 3:position + 5], 'big')
+            position += length
+    return None
+
+
+def safe_preview(source, entry):
+    kind = preview_kind(entry['mime'], entry['name'], entry['size'])
+    if kind is None:
+        if preview_kind(entry['mime'], entry['name'], 0):
+            raise RpcError('文件较大，请下载后查看', 413)
+        raise RpcError('此格式暂不支持预览，请下载后查看', 415)
+    if kind == 'text':
+        raw = source.read(PREVIEW_LIMITS['text'] + 1)
+        if len(raw) > PREVIEW_LIMITS['text']:
+            raise RpcError('文本较大，请下载后查看', 413)
+        if len(raw) != entry['size']:
+            raise RpcError('文件不完整，请重新下载', 409)
+        try:
+            text = raw.decode('utf-8-sig')
+        except UnicodeError:
+            raise RpcError('文本编码暂不支持，请下载后查看', 415) from None
+        if any(ord(char) < 32 and char not in '\r\n\t' for char in text):
+            raise RpcError('文件包含二进制内容，请下载后查看', 415)
+        return 'text/plain; charset=utf-8', text.encode('utf-8')
+    head = source.read(min(entry['size'], 256 * 1024))
+    if kind == 'image':
+        dimensions = raster_dimensions(head)
+        if dimensions:
+            mime, width, height = dimensions
+            if 0 < width <= 32768 and 0 < height <= 32768 and width * height <= MAX_IMAGE_PIXELS:
+                return mime, None
+            raise RpcError('图片尺寸较大，请下载后查看', 413)
+    elif kind in ('audio', 'video'):
+        if len(head) >= 16 and head[4:8] == b'ftyp' and 16 <= int.from_bytes(head[:4], 'big') <= entry['size']:
+            return ('video/mp4' if kind == 'video' else 'audio/mp4'), None
+        if head.startswith(b'\x1a\x45\xdf\xa3') and b'webm' in head[:4096]:
+            return kind + '/webm', None
+        if head.startswith(b'OggS\x00'):
+            return kind + '/ogg', None
+        if kind == 'audio':
+            if head.startswith(b'RIFF') and head[8:12] == b'WAVE':
+                return 'audio/wav', None
+            if head.startswith(b'fLaC'):
+                return 'audio/flac', None
+            if head.startswith(b'ID3') and len(head) >= 10 or len(head) >= 2 and head[0] == 0xff and head[1] & 0xe0 == 0xe0:
+                return 'audio/mpeg', None
+    raise RpcError('文件内容与可预览格式不符，请下载后查看', 415)
 
 
 class InboxServer(ThreadingHTTPServer):
@@ -200,10 +282,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'no-referrer')
-        self.send_header('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        self.send_header('Content-Security-Policy', (extra or {}).get('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' blob:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"))
         self.send_header('Connection', 'close')
         for name, value in (extra or {}).items():
-            self.send_header(name, value)
+            if name.lower() != 'content-security-policy':
+                self.send_header(name, value)
         self.end_headers()
         self.close_connection = True
 
@@ -307,6 +390,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.set_deadline(self.server.deadline)
                 self.bundle(url.query)
                 return
+            if path.startswith('/api/preview/') and self.command == 'GET':
+                self.set_deadline(self.server.deadline)
+                self.download(path, preview=True)
+                return
             if path.startswith('/api/download/') and self.command == 'GET':
                 self.set_deadline(self.server.deadline)
                 self.download(path)
@@ -394,7 +481,7 @@ class Handler(BaseHTTPRequestHandler):
                     writer.abort()
                     raise
 
-    def download(self, path):
+    def download(self, path, preview=False):
         parts = path.split('/')
         if len(parts) != 5:
             raise RpcError('下载路径无效')
@@ -410,6 +497,13 @@ class Handler(BaseHTTPRequestHandler):
                 raise RpcError('文件不完整', 409)
         # An open immutable inode remains safe if another request deletes its item.
         with source:
+            mime = 'application/octet-stream'
+            preview_headers = {'Content-Security-Policy': PREVIEW_CSP, 'Cross-Origin-Resource-Policy': 'same-origin'} if preview else {}
+            if preview:
+                mime, text = safe_preview(source, entry)
+                if text is not None:
+                    self.bytes(200, text, mime, {**preview_headers, 'Content-Disposition': 'inline'})
+                    return
             size = entry['size']
             start, end, status = 0, size - 1, 200
             etag = '"' + entry['sha256'] + '"'
@@ -432,10 +526,10 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 status = 206
             length = max(0, end - start + 1)
-            headers = {'Content-Disposition': "attachment; filename=download; filename*=UTF-8''" + quote(entry['name'], safe=''), 'Accept-Ranges': 'bytes', 'ETag': etag}
+            headers = {**preview_headers, 'Content-Disposition': ("inline" if preview else "attachment") + "; filename=download; filename*=UTF-8''" + quote(entry['name'], safe=''), 'Accept-Ranges': 'bytes', 'ETag': etag}
             if status == 206:
                 headers['Content-Range'] = f'bytes {start}-{end}/{size}'
-            self.headers_out(status, 'application/octet-stream', length, headers)
+            self.headers_out(status, mime, length, headers)
             source.seek(start)
             remaining = length
             while remaining:

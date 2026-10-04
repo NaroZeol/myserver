@@ -10,7 +10,7 @@ import modules
 from rpc import Reply, Request, Route, RpcError
 from system_metrics import snapshot
 
-VERSION = '1.11.0'
+VERSION = '1.12.0'
 
 
 def session(connection, request):

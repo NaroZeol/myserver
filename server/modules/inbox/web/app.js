@@ -9,7 +9,11 @@ let csrf = "",
   editId = "";
 let tasks = [],
   refreshVersion = 0;
-let pickedItems = new Set();
+let pickedItems = new Set(),
+  selecting = false,
+  deleting = false,
+  viewerState = null,
+  previewController = null;
 try {
   tasks = JSON.parse(
     sessionStorage.getItem("myserver-inbox-transfers") || "[]",
@@ -82,6 +86,7 @@ function showLogin() {
   $("logout").hidden = true;
   csrf = "";
   pickedItems.clear();
+  if ($("viewer").open) $("viewer").close();
 }
 async function enter(value) {
   csrf = value;
@@ -530,14 +535,29 @@ async function pump() {
   }
 }
 async function refresh(append = false) {
+  if (append && !hasMore) return;
   const version = ++refreshVersion;
   const start = append ? offset : 0;
   const result = await api(
     "/inbox?" +
-      new URLSearchParams({ q: $("search").value, offset: start, limit: 50 }),
+      new URLSearchParams({
+        q: $("search").value,
+        type: $("type-filter").value,
+        source: $("source-filter").value,
+        since: filterSince,
+        sort: $("sort-filter").value,
+        offset: start,
+        limit: 50,
+      }),
   );
   if (version !== refreshVersion) return;
-  items = append ? items.concat(result.items) : result.items;
+  items = append
+    ? [
+        ...new Map(
+          items.concat(result.items).map((item) => [item.id, item]),
+        ).values(),
+      ]
+    : result.items;
   const loaded = new Set(items.map((item) => item.id));
   pickedItems = new Set([...pickedItems].filter((id) => loaded.has(id)));
   offset = result.next_offset;
@@ -554,11 +574,8 @@ function selectionEntries(selection = pickedItems) {
 }
 function withinSelectionLimit(selection) {
   const chosen = selectionEntries(selection);
-  if (
-    chosen.length > 32 ||
-    chosen.reduce((total, item) => total + item.files.length, 0) > 64
-  ) {
-    message("每次最多下载 32 条收件、64 个附件，请减少选择。");
+  if (chosen.length > 32) {
+    message("每次最多选择 32 条收件。");
     return false;
   }
   return true;
@@ -566,10 +583,12 @@ function withinSelectionLimit(selection) {
 function renderSelection() {
   const chosen = selectionEntries();
   const count = chosen.length;
-  $("selection-count").textContent = count
-    ? "已选 " + count + " 条收件"
-    : "未选择收件";
+  $("selection-tools").hidden = !selecting;
+  $("selection-toggle").textContent = selecting ? "完成" : "选择";
+  $("selection-toggle").setAttribute("aria-pressed", String(selecting));
+  $("selection-count").textContent = count ? "已选 " + count + " 条" : "未选择";
   $("download-selected").disabled = count === 0;
+  $("delete-selected").disabled = deleting || count === 0;
   $("select-loaded").disabled = items.length === 0;
   $("select-loaded").checked = items.length > 0 && count === items.length;
   $("select-loaded").indeterminate = count > 0 && count < items.length;
@@ -585,6 +604,10 @@ $("download-selected").onclick = async () => {
   try {
     const chosen = selectionEntries();
     if (!chosen.length || !withinSelectionLimit(pickedItems)) return;
+    if (chosen.reduce((total, item) => total + item.files.length, 0) > 64) {
+      message("一次下载最多 64 个附件，请减少选择。");
+      return;
+    }
     await api("/session");
     const link = document.createElement("a");
     link.href =
@@ -595,6 +618,81 @@ $("download-selected").onclick = async () => {
     message(error.message);
   }
 };
+const typeNames = {
+  image: "图片",
+  video: "视频",
+  audio: "音频",
+  document: "文档",
+  archive: "压缩包",
+  apk: "安装包",
+  other: "文件",
+};
+const sourceNames = { phone: "手机", computer: "电脑", server: "服务器" };
+function downloadUrl(item, file) {
+  return "/api/download/" + item.id + "/" + file.id;
+}
+function previewUrl(item, file) {
+  return "/api/preview/" + item.id + "/" + file.id;
+}
+function openEditor(item) {
+  editId = item.id;
+  $("edit-title").value = item.title;
+  $("edit-note").value = item.note;
+  $("edit").showModal();
+}
+async function deleteItems(chosen) {
+  if (
+    deleting ||
+    !chosen.length ||
+    !confirm(
+      chosen.length === 1
+        ? "删除“" + chosen[0].title + "”及其附件？"
+        : "删除所选 " + chosen.length + " 条收件及其附件？",
+    )
+  )
+    return;
+  deleting = true;
+  $("delete-selected").disabled = true;
+  let removed = 0,
+    errorMessage = "";
+  try {
+    for (const item of chosen) {
+      try {
+        await api("/inbox/items/" + item.id, "DELETE");
+        pickedItems.delete(item.id);
+        removed++;
+      } catch (error) {
+        errorMessage = error.message;
+        if (error.status === 401) break;
+      }
+    }
+    try {
+      await refresh();
+    } catch (error) {
+      errorMessage = error.message;
+    }
+    if (removed < chosen.length)
+      message(
+        "已删除 " +
+          removed +
+          " 条，" +
+          (chosen.length - removed) +
+          " 条未删除" +
+          (errorMessage ? "：" + errorMessage : ""),
+      );
+    else message("已删除 " + removed + " 条收件。");
+  } finally {
+    deleting = false;
+    renderSelection();
+  }
+}
+$("delete-selected").onclick = () =>
+  deleteItems(selectionEntries()).catch((error) => message(error.message));
+$("selection-toggle").onclick = () => {
+  selecting = !selecting;
+  if (!selecting) pickedItems.clear();
+  renderItems();
+};
 function renderItems() {
   renderSelection();
   $("items").replaceChildren();
@@ -602,9 +700,12 @@ function renderItems() {
     $("items").append(
       node(
         "div",
-        $("search").value
-          ? "没有找到匹配的收件。"
-          : "还没有收件，先发送一个文件或一段文字。",
+        $("search").value ||
+          $("type-filter").value !== "all" ||
+          $("source-filter").value !== "all" ||
+          filterSince
+          ? "没有匹配的收件"
+          : "还没有收件",
         "empty",
       ),
     );
@@ -612,11 +713,12 @@ function renderItems() {
   }
   for (const item of items) {
     const card = node("article", undefined, "item"),
-      top = node("div", undefined, "item-top");
-    const heading = node("div", undefined, "item-title");
+      top = node("div", undefined, "item-top"),
+      heading = node("div", undefined, "item-title");
     const checkbox = node("input");
     checkbox.type = "checkbox";
     checkbox.className = "item-checkbox";
+    checkbox.hidden = !selecting;
     checkbox.setAttribute("aria-label", "选择收件：" + item.title);
     checkbox.checked = pickedItems.has(item.id);
     checkbox.onchange = () => {
@@ -642,56 +744,249 @@ function renderItems() {
           minute: "2-digit",
         }) +
           " · " +
-          ({ browser: "电脑", server: "服务器", Android: "手机" }[
-            item.source
-          ] || item.source),
+          (sourceNames[item.source_kind] ||
+            { browser: "电脑", server: "服务器", Android: "手机", app: "手机" }[
+              item.source
+            ] ||
+            item.source),
         "item-time",
       ),
     );
-    card.append(top);
-    if (item.text) card.append(node("div", item.text, "item-text"));
-    if (item.note) card.append(node("p", item.note, "item-note"));
-    for (const file of item.files) {
-      const link = node("a", undefined, "file-link");
-      link.href = "/api/download/" + item.id + "/" + file.id;
-      link.append(
-        node("span", "↓ " + file.name),
-        node("span", bytes(file.size)),
-      );
-      card.append(link);
-    }
-    const actions = node("div", undefined, "item-actions");
+    const more = node("details", undefined, "item-more"),
+      summary = node("summary", "···");
+    summary.setAttribute("aria-label", "更多操作：" + item.title);
+    more.append(summary);
+    const menu = node("div", undefined, "item-actions");
     if (item.text)
-      actions.append(
+      menu.append(
         button("复制文字", async () => {
+          more.open = false;
           await navigator.clipboard.writeText(item.text);
-          message("文字已复制。");
+          message("已复制");
         }),
       );
-    actions.append(
+    menu.append(
       button("编辑", () => {
-        editId = item.id;
-        $("edit-title").value = item.title;
-        $("edit-note").value = item.note;
-        $("edit").showModal();
+        more.open = false;
+        openEditor(item);
       }),
     );
-    actions.append(
-      button("删除", async () => {
-        if (
-          !confirm(
-            "删除“" + item.title + "”？这会从服务器移除该收件和全部附件。",
-          )
-        )
-          return;
-        await api("/inbox/items/" + item.id, "DELETE");
-        await refresh();
+    menu.append(
+      button("删除", () => {
+        more.open = false;
+        return deleteItems([item]);
       }),
     );
-    card.append(actions);
+    more.append(menu);
+    top.append(more);
+    card.append(top);
+    if (item.text) {
+      const text = button(item.text, () => openText(item), "item-text");
+      text.setAttribute("aria-label", "查看文字：" + item.title);
+      card.append(text);
+    }
+    if (item.note) card.append(node("p", item.note, "item-note"));
+    const attachments = node("div", undefined, "attachments");
+    item.files.forEach((file, index) => {
+      const thumbnail =
+        file.preview === "image" && file.size <= 2 * 1024 * 1024;
+      const tile = button(
+        "",
+        () => openViewer(item, index),
+        "file-tile" + (thumbnail ? " image-tile" : ""),
+      );
+      tile.setAttribute("aria-label", "预览：" + file.name);
+      if (thumbnail) {
+        const image = node("img");
+        image.src = previewUrl(item, file);
+        image.alt = file.name;
+        image.loading = "lazy";
+        image.decoding = "async";
+        image.onerror = () => {
+          image.remove();
+          tile.classList.add("preview-unavailable");
+          tile.prepend(node("span", "图片", "file-symbol"));
+        };
+        tile.append(image);
+      } else
+        tile.append(
+          node(
+            "span",
+            {
+              image: "图",
+              video: "▶",
+              audio: "♪",
+              document: "文",
+              archive: "ZIP",
+              apk: "APK",
+            }[file.kind] || "文件",
+            "file-symbol",
+          ),
+        );
+      const label = node("span", undefined, "file-label");
+      label.append(
+        node("span", file.name, "file-name"),
+        node("small", bytes(file.size), "muted"),
+      );
+      tile.append(label);
+      attachments.append(tile);
+    });
+    if (item.files.length) card.append(attachments);
     $("items").append(card);
   }
 }
+document.addEventListener("click", (event) => {
+  for (const menu of document.querySelectorAll(".item-more[open]"))
+    if (!menu.contains(event.target)) menu.open = false;
+});
+function clearPreview() {
+  previewController?.abort();
+  previewController = null;
+  for (const media of $("viewer-content").querySelectorAll("video,audio")) {
+    media.pause();
+    media.removeAttribute("src");
+    media.load();
+  }
+  $("viewer-content").replaceChildren();
+  $("viewer-content").classList.remove("zoomed");
+  $("viewer-zoom").hidden = true;
+  $("viewer-zoom").textContent = "放大";
+  $("viewer-zoom").setAttribute("aria-pressed", "false");
+}
+function viewerNavigation() {
+  const state = viewerState,
+    count = state?.item.files.length || 0,
+    file = state?.item.files[state.index];
+  $("viewer-prev").hidden = !file || count < 2;
+  $("viewer-next").hidden = !file || count < 2;
+  $("viewer-prev").disabled = state?.index === 0;
+  $("viewer-next").disabled = !state || state.index >= count - 1;
+  $("viewer-position").textContent =
+    file && count > 1 ? state.index + 1 + " / " + count : "";
+}
+function openText(item) {
+  clearPreview();
+  viewerState = { item, index: -1 };
+  $("viewer-title").textContent = item.title;
+  $("viewer-meta").textContent = "";
+  $("viewer-content").append(node("pre", item.text, "viewer-text"));
+  $("viewer-download").hidden = true;
+  $("viewer-copy").hidden = false;
+  $("viewer-copy").onclick = () =>
+    navigator.clipboard
+      .writeText(item.text)
+      .then(() => message("已复制"))
+      .catch((error) => message(error.message));
+  viewerNavigation();
+  if (!$("viewer").open) $("viewer").showModal();
+}
+async function openViewer(item, index) {
+  clearPreview();
+  viewerState = { item, index };
+  const file = item.files[index];
+  $("viewer-title").textContent = file.name;
+  $("viewer-meta").textContent =
+    (typeNames[file.kind] || "文件") + " · " + bytes(file.size);
+  $("viewer-download").hidden = false;
+  $("viewer-download").href = downloadUrl(item, file);
+  $("viewer-copy").hidden = true;
+  viewerNavigation();
+  if (!$("viewer").open) $("viewer").showModal();
+  const target = $("viewer-content"),
+    status = node("p", "载入中…", "preview-status");
+  target.append(status);
+  const failure = () => {
+    status.textContent = "暂时无法预览，可下载查看";
+  };
+  if (file.preview === "text") {
+    previewController = new AbortController();
+    const signal = previewController.signal;
+    try {
+      const response = await fetch(previewUrl(item, file), { signal });
+      if (!response.ok) {
+        const value = await response.json();
+        throw new Error(value.error || "无法预览");
+      }
+      if (!response.headers.get("Content-Type")?.startsWith("text/plain"))
+        throw new Error("预览格式无效");
+      const text = await response.text();
+      if (signal.aborted) return;
+      target.replaceChildren(node("pre", text, "viewer-text"));
+      $("viewer-copy").hidden = false;
+      $("viewer-copy").onclick = () =>
+        navigator.clipboard
+          .writeText(text)
+          .then(() => message("已复制"))
+          .catch((error) => message(error.message));
+    } catch (error) {
+      if (error.name !== "AbortError") status.textContent = error.message;
+    }
+  } else if (file.preview === "image") {
+    const image = node("img");
+    image.alt = file.name;
+    image.className = "viewer-image";
+    image.onload = () => {
+      status.remove();
+      $("viewer-zoom").hidden = false;
+    };
+    image.ondblclick = toggleZoom;
+    image.onerror = () => {
+      image.remove();
+      failure();
+    };
+    image.src = previewUrl(item, file);
+    target.append(image);
+  } else if (file.preview === "video" || file.preview === "audio") {
+    const media = node(file.preview);
+    media.controls = true;
+    media.preload = "metadata";
+    media.onloadedmetadata = () => status.remove();
+    media.onerror = failure;
+    media.src = previewUrl(item, file);
+    target.append(media);
+  } else {
+    status.textContent = "";
+    const kind = node(
+      "div",
+      (file.name.split(".").pop() || typeNames[file.kind] || "文件")
+        .toUpperCase()
+        .slice(0, 12),
+      "file-cover",
+    );
+    target.replaceChildren(kind);
+  }
+}
+function toggleZoom() {
+  const zoomed = $("viewer-content").classList.toggle("zoomed");
+  $("viewer-zoom").textContent = zoomed ? "适应" : "放大";
+  $("viewer-zoom").setAttribute("aria-pressed", String(zoomed));
+  $("viewer-content").scrollTo(0, 0);
+}
+$("viewer-zoom").onclick = toggleZoom;
+$("viewer-close").onclick = () => $("viewer").close();
+$("viewer").onclose = () => {
+  clearPreview();
+  viewerState = null;
+};
+$("viewer-prev").onclick = () => {
+  if (viewerState?.index > 0)
+    openViewer(viewerState.item, viewerState.index - 1);
+};
+$("viewer-next").onclick = () => {
+  if (viewerState && viewerState.index < viewerState.item.files.length - 1)
+    openViewer(viewerState.item, viewerState.index + 1);
+};
+$("viewer").addEventListener("keydown", (event) => {
+  if (["VIDEO", "AUDIO", "INPUT"].includes(event.target.tagName)) return;
+  if (event.key === "ArrowLeft" && !$("viewer-prev").hidden) {
+    event.preventDefault();
+    $("viewer-prev").click();
+  }
+  if (event.key === "ArrowRight" && !$("viewer-next").hidden) {
+    event.preventDefault();
+    $("viewer-next").click();
+  }
+});
 $("edit-cancel").onclick = () => $("edit").close();
 $("edit-form").onsubmit = async (event) => {
   event.preventDefault();
@@ -708,15 +1003,55 @@ $("edit-form").onsubmit = async (event) => {
 };
 $("refresh").onclick = () => refresh().catch((e) => message(e.message));
 $("more").onclick = () => refresh(true).catch((e) => message(e.message));
-let searchTimer;
+let searchTimer,
+  filterSince = 0;
+function filtersChanged() {
+  pickedItems.clear();
+  viewerState = null;
+  if ($("viewer").open) $("viewer").close();
+  const days = Number($("time-filter").value);
+  filterSince = days ? Math.floor(Date.now() / 1000) - days * 86400 : 0;
+  offset = 0;
+  hasMore = false;
+  items = [];
+  refreshVersion++;
+  $("more").hidden = true;
+  const active = [
+    $("source-filter").value !== "all",
+    days > 0,
+    $("sort-filter").value !== "newest",
+  ].filter(Boolean).length;
+  $("filter-toggle").textContent = active ? "筛选 · " + active : "筛选";
+  renderItems();
+  refresh().catch((error) => message(error.message));
+}
 $("search").oninput = () => {
   pickedItems.clear();
+  offset = 0;
+  hasMore = false;
+  refreshVersion++;
+  $("more").hidden = true;
   renderItems();
   clearTimeout(searchTimer);
   searchTimer = setTimeout(
-    () => refresh().catch((e) => message(e.message)),
+    () => refresh().catch((error) => message(error.message)),
     250,
   );
+};
+for (const id of ["type-filter", "source-filter", "time-filter", "sort-filter"])
+  $(id).onchange = filtersChanged;
+$("filter-toggle").onclick = () => {
+  const hidden = !$("filter-panel").hidden;
+  $("filter-panel").hidden = hidden;
+  $("filter-toggle").setAttribute("aria-expanded", String(!hidden));
+};
+$("reset-filters").onclick = () => {
+  $("type-filter").value = "all";
+  $("source-filter").value = "all";
+  $("time-filter").value = "0";
+  $("sort-filter").value = "newest";
+  $("search").value = "";
+  filtersChanged();
 };
 api("/session")
   .then((value) => enter(value.csrf))
