@@ -284,6 +284,21 @@ public class Ui {
           c.drawLine(15, 11, 20, 11, p);
           c.drawLine(4, 18, 4, 13, p);
           c.drawLine(4, 13, 9, 13, p);
+        } else if (id.equals("inbox")) {
+          Path tray = new Path();
+          tray.moveTo(3, 10);
+          tray.lineTo(6, 4);
+          tray.lineTo(18, 4);
+          tray.lineTo(21, 10);
+          tray.lineTo(21, 20);
+          tray.lineTo(3, 20);
+          tray.close();
+          c.drawPath(tray, p);
+          c.drawLine(3, 12, 8, 12, p);
+          c.drawLine(8, 12, 10, 15, p);
+          c.drawLine(10, 15, 14, 15, p);
+          c.drawLine(14, 15, 16, 12, p);
+          c.drawLine(16, 12, 21, 12, p);
         } else if (id.equals("thoughts")) {
           c.drawRoundRect(5, 3, 19, 21, 2, 2, p);
           for (int y = 8; y < 18; y += 4) c.drawLine(9, y, 15, y, p);

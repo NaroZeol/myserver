@@ -41,7 +41,7 @@ public final class DeviceAccess {
         proof.disconnect();
         ShellIdentity.remember(context, profile);
       }
-      registerRpc(session);
+      registerRpc(session, "");
     } catch (JSchException e) {
       throw SshConnection.failure(e, passwordAuthentication);
     } finally {
@@ -51,12 +51,38 @@ public final class DeviceAccess {
     return new SshRpc(profile).request("/session", "GET", null);
   }
 
-  private static void registerRpc(Session session) throws Exception {
+  /** Grant just the inbox permissions, using existing shell authority when available. */
+  public static JSONObject enableInbox(ServerProfile profile, byte[] password)
+    throws Exception {
+    Session session = null;
+    boolean passwordAuthentication = password != null;
+    try {
+      session = passwordAuthentication
+        ? SshConnection.open(profile, password)
+        : SshConnection.open(
+            profile,
+            null,
+            new DeviceKey(ShellIdentity.keyId(profile))
+          );
+      if (password != null) Arrays.fill(password, (byte) 0);
+      registerRpc(session, " --add-capabilities inbox.read,inbox.write");
+    } catch (JSchException e) {
+      throw SshConnection.failure(e, passwordAuthentication);
+    } finally {
+      if (password != null) Arrays.fill(password, (byte) 0);
+      if (session != null) session.disconnect();
+    }
+    return new SshRpc(profile).request("/session", "GET", null);
+  }
+
+  private static void registerRpc(Session session, String permissionOptions)
+    throws Exception {
     ChannelExec channel = null;
     try {
       channel = (ChannelExec) session.openChannel("exec");
       channel.setCommand(
-        "python3 \"$HOME/.local/share/myserver/deploy/register-device.py\" --name Android --key-file /dev/stdin"
+        "python3 \"$HOME/.local/share/myserver/deploy/register-device.py\" --name Android --key-file /dev/stdin" +
+          permissionOptions
       );
       channel.setPty(false);
       channel.setAgentForwarding(false);

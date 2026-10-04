@@ -29,3 +29,14 @@ jobs:
           python-version: '3.10'
       - run: pip install pytest==8.4.2
       - run: python -m pytest server/tests -q
+      - name: Browser inbox interaction tests
+        run: |
+          npm install --prefix "$RUNNER_TEMP/inbox-tests" --no-save playwright@1.63.0
+          "$RUNNER_TEMP/inbox-tests/node_modules/.bin/playwright" install --with-deps chromium
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/inbox-tests/node_modules/playwright/index.mjs" INBOX_SCREENSHOTS="$RUNNER_TEMP/inbox-screenshots" node server/tests/inbox-browser.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: myserver-inbox-web-verification
+          path: ${{ runner.temp }}/inbox-screenshots/
+          retention-days: 14

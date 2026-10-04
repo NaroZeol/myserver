@@ -43,7 +43,7 @@ def atomic_write(path, text):
         if os.path.exists(temporary): os.unlink(temporary)
 
 
-def enroll(root, authorized, key, name, capabilities):
+def enroll(root, authorized, key, name, capabilities, add_capabilities=False):
     normalized, ident = public_key(key)
     if not capabilities or not set(capabilities) <= modules.capabilities():
         raise ValueError('未知设备权限')
@@ -60,6 +60,12 @@ def enroll(root, authorized, key, name, capabilities):
         matches = [value for value in original.splitlines() if normalized.split()[1] in value.split()]
         if matches and matches != [line]:
             raise ValueError('此公钥已有其他 SSH 权限，请使用专属设备密钥')
+        if add_capabilities and matches:
+            previous = json.loads((devices / (ident + '.json')).read_text())
+            capabilities = sorted(set(previous['capabilities']) | set(capabilities))
+            if not set(capabilities) <= modules.capabilities():
+                raise ValueError('已有设备包含未知权限，请先检查设备登记')
+            name = previous.get('name', name)
         record = dict(id=ident, name=name[:80], public_key=normalized, capabilities=sorted(set(capabilities)),
                       registered_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
         atomic_write(devices / (ident + '.json'), json.dumps(record, ensure_ascii=False, indent=2)+'\n')
@@ -87,7 +93,9 @@ def main():
     parser.add_argument('--name', default='我的手机')
     parser.add_argument('--key-file', type=Path)
     parser.add_argument('--id')
-    parser.add_argument('--capabilities', default=','.join(sorted(modules.capabilities())))
+    permission = parser.add_mutually_exclusive_group()
+    permission.add_argument('--capabilities')
+    permission.add_argument('--add-capabilities', help='Explicitly add only these permissions to this device')
     args = parser.parse_args()
     root = data_root()
     authorized = Path.home() / '.ssh/authorized_keys'
@@ -100,7 +108,8 @@ def main():
         print('设备已撤销；其他 SSH 公钥保持不变。')
     else:
         key = args.key_file.read_text() if args.key_file else input('粘贴 App 公钥：\n')
-        ident = enroll(root, authorized, key, args.name, args.capabilities.split(','))
+        capabilities = args.add_capabilities or args.capabilities or ','.join(sorted(modules.capabilities()))
+        ident = enroll(root, authorized, key, args.name, capabilities.split(','), args.add_capabilities is not None)
         print('设备已登记：' + ident)
         print('现在回到 App，点击「验证连接」。不需要重启 SSH。')
 

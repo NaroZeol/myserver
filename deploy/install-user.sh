@@ -31,6 +31,16 @@ for name in ['myserver-backup.service','myserver-backup.timer','myserver-publish
 PY
 systemctl --user daemon-reload
 [[ "${1:-}" == --units-only ]] && exit 0
+mkdir -p "$HOME/.local/bin"
+if [[ -e "$HOME/.local/bin/myserver" || -L "$HOME/.local/bin/myserver" ]]; then
+  [[ -L "$HOME/.local/bin/myserver" && "$(readlink "$HOME/.local/bin/myserver")" == "$data_dir/deploy/myserver" ]] || {
+    echo 'Existing ~/.local/bin/myserver is not managed by this installation.' >&2
+    exit 1
+  }
+else
+  ln -s "$data_dir/deploy/myserver" "$HOME/.local/bin/myserver"
+fi
+chmod 700 "$data_dir/deploy/myserver"
 python3 -S "$data_dir/app/cli.py" init
 python3 -S "$data_dir/app/cli.py" check
 systemctl --user start myserver-backup.service

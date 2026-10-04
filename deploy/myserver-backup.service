@@ -1,5 +1,5 @@
 [Unit]
-Description=Back up myserver with SQLite online backup
+Description=Back up myserver database and inbox files
 
 [Service]
 Type=oneshot

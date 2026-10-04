@@ -6,9 +6,9 @@ server_target="${1:-${MYSERVER_SSH_TARGET:-}}"
 [[ "$server_target" != -* ]] || { echo 'Invalid SSH target.' >&2; exit 1; }
 # Upload a complete bundle without changing the active application.
 tar -C "$repo_dir" --exclude=__pycache__ --exclude=tests --exclude=README.md -cf - \
-    server/cli.py server/database.py server/rpc.py server/service.py server/paths.py \
+    server/cli.py server/backups.py server/database.py server/rpc.py server/service.py server/paths.py \
     server/ssh_gateway.py server/system_metrics.py server/modules \
-    deploy/activate.sh deploy/activate.py deploy/install-user.sh deploy/backup.sh \
+    deploy/activate.sh deploy/activate.py deploy/install-user.sh deploy/backup.sh deploy/myserver \
     deploy/myserver-backup.service deploy/myserver-backup.timer \
     deploy/myserver-publish.service deploy/myserver-publish.timer \
     deploy/configure-gist.py deploy/ssh-gateway.sh deploy/register-device.py | ssh "$server_target" '

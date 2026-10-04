@@ -23,6 +23,7 @@ shutil.copytree('res', 'build/res')
 manifest = Path('AndroidManifest.xml').read_text()
 if os.environ.get('MYSERVER_PREVIEW') == '1':
     manifest = manifest.replace('package="app.thoughts.mobile"', 'package="app.thoughts.mobile.preview"').replace('android:label="myserver"', 'android:label="myserver·预览"')
+    manifest = manifest.replace('android:authorities="app.thoughts.mobile.inbox.files"', 'android:authorities="app.thoughts.mobile.preview.inbox.files"')
     p = Path('build/res/xml/shortcuts.xml')
     p.write_text(p.read_text().replace('android:targetPackage="app.thoughts.mobile"', 'android:targetPackage="app.thoughts.mobile.preview"'))
 Path('build/AndroidManifest.xml').write_text(manifest)

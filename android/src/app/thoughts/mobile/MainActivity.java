@@ -17,6 +17,9 @@ import app.thoughts.mobile.core.connection.ConnectionFailure;
 import app.thoughts.mobile.core.connection.DeviceAccount;
 import app.thoughts.mobile.core.connection.ServerApi;
 import app.thoughts.mobile.core.connection.ServerProfile;
+import app.thoughts.mobile.modules.inbox.InboxFeature;
+import app.thoughts.mobile.modules.inbox.InboxFiles;
+import app.thoughts.mobile.modules.inbox.InboxShareActivity;
 import app.thoughts.mobile.modules.server.ServerFeature;
 import app.thoughts.mobile.modules.thoughts.Store;
 import app.thoughts.mobile.modules.thoughts.Sync;
@@ -40,6 +43,7 @@ public final class MainActivity extends Activity implements ThoughtsHost {
   private DeviceAccount account;
   private ServerApi api;
   private ThoughtsModule thoughts;
+  private InboxFeature inbox;
   private Ui ui;
   private Feature active;
   private String current = "server",
@@ -62,6 +66,8 @@ public final class MainActivity extends Activity implements ThoughtsHost {
     ui = new Ui(this);
     thoughts = new ThoughtsModule(this);
     add(new ServerFeature(this));
+    inbox = new InboxFeature(this);
+    add(inbox);
     add(thoughts.screen());
     add(new SettingsFeature(this));
     if (state != null) {
@@ -73,7 +79,7 @@ public final class MainActivity extends Activity implements ThoughtsHost {
       remoteExport = state.getBoolean("remote_export");
     }
     redraw();
-    thoughts.receiveShare(getIntent());
+    receiveIntent(getIntent());
     active.enter();
   }
 
@@ -86,6 +92,31 @@ public final class MainActivity extends Activity implements ThoughtsHost {
   protected void onNewIntent(Intent intent) {
     super.onNewIntent(intent);
     setIntent(intent);
+    receiveIntent(intent);
+  }
+
+  private void receiveIntent(Intent intent) {
+    if (
+      Intent.ACTION_SEND.equals(intent.getAction()) ||
+      Intent.ACTION_SEND_MULTIPLE.equals(intent.getAction())
+    ) {
+      Intent shared = new Intent(intent).setClass(
+        this,
+        InboxShareActivity.class
+      );
+      startActivity(shared);
+      intent.setAction(null);
+      return;
+    }
+    String requested = intent.getStringExtra("open_feature");
+    if (intent.getBooleanExtra("inbox", false)) {
+      requested = "inbox";
+      intent.removeExtra("inbox");
+    }
+    if (requested != null) {
+      intent.removeExtra("open_feature");
+      navigate(requested);
+    }
     thoughts.receiveShare(intent);
   }
 
@@ -100,6 +131,7 @@ public final class MainActivity extends Activity implements ThoughtsHost {
   protected void onResume() {
     super.onResume();
     foreground = true;
+    InboxFiles.resumeInstall(this);
     if (active != null) active.resume();
     try {
       (
@@ -420,6 +452,7 @@ public final class MainActivity extends Activity implements ThoughtsHost {
   }
 
   public void sync() {
+    if (!account.can("thoughts")) return;
     if (!account.isVerified()) return;
     if (!SYNCING.compareAndSet(false, true)) return;
     if (current.equals("thoughts")) status("正在同步 · 本机记录已保留");
@@ -462,8 +495,18 @@ public final class MainActivity extends Activity implements ThoughtsHost {
     startActivityForResult(intent, 41);
   }
 
+  public void onRequestPermissionsResult(
+    int request,
+    String[] permissions,
+    int[] results
+  ) {
+    super.onRequestPermissionsResult(request, permissions, results);
+    if (inbox != null) inbox.onRequestPermissionsResult(request);
+  }
+
   protected void onActivityResult(int request, int result, Intent data) {
     super.onActivityResult(request, result, data);
+    if (inbox != null && inbox.onActivityResult(request, result, data)) return;
     if (request != 41 || result != RESULT_OK || data == null) return;
     android.net.Uri uri = data.getData();
     boolean remote = remoteExport;

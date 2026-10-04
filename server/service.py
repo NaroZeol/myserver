@@ -10,7 +10,7 @@ import modules
 from rpc import Reply, Request, Route, RpcError
 from system_metrics import snapshot
 
-VERSION = '1.8.1'
+VERSION = '1.11.0'
 
 
 def session(connection, request):
@@ -19,7 +19,8 @@ def session(connection, request):
 
 def system_status(connection, request):
     root = request.database.parent
-    backups = sorted((root / 'backups').glob('myserver-????????-??????.sqlite'))
+    backups = sorted([*(root / 'backups').glob('myserver-????????-??????.sqlite'),
+                      *(root / 'backups').glob('myserver-????????-??????.tar')])
     latest = backups[-1] if backups else None
     return Reply(dict(
         protocol_version=1, service='myserver', version=VERSION,

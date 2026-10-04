@@ -1,7 +1,7 @@
 """Installed server modules and their explicit RPC permissions."""
 from importlib import import_module
 
-ENABLED = ("thoughts",)
+ENABLED = ("thoughts", "inbox")
 
 
 def features():

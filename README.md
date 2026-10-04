@@ -8,7 +8,7 @@ myserver/
 │   └── src/app/thoughts/mobile/
 │       ├── core/               # UI、连接配置、主机核验与设备密钥
 │       ├── shell/              # 应用设置
-│       └── modules/            # terminal、server、thoughts
+│       └── modules/            # terminal、server、inbox、thoughts
 ├── server/
 │   ├── service.py              # RPC 分发、权限与服务器状态
 │   ├── database.py             # 数据库生命周期
@@ -16,6 +16,8 @@ myserver/
 │   ├── ssh_gateway.py          # 受限 SSH RPC 网关
 │   ├── system_metrics.py       # CPU、内存、磁盘与运行时间
 │   ├── modules/thoughts/       # 想法记录、历史与 Gist 发布
+│   ├── modules/inbox/          # 私有收件箱、文件传输与临时管理页
+│   ├── backups.py              # 数据库与文件的一致备份
 │   └── tests/
 └── deploy/                     # 部署、设备登记、备份与 systemd
 ```
@@ -24,11 +26,13 @@ myserver/
 - [服务端部署与维护](server/README.md)
 - [SSH 终端](android/TERMINAL.md)
 - [想法功能](server/modules/thoughts/README.md)
+- [私有收件箱](docs/inbox.md)
 - [安全边界](SECURITY.md)
 
 ## 使用
 
 - **服务器**：默认首页，集中管理连接、监控与终端。监控支持手动或 2 / 5 / 10 / 30 / 60 秒刷新，只在页面可见时自动采样。
+- **收件箱**：手机系统分享、电脑浏览器与服务器命令共用的私有空间。支持文字、链接、多附件、可恢复传输，以及下载、另存、转发和 APK 系统安装。
 - **想法**：列表和编辑属于同一栏目，保存后回到列表；编辑中退出会保留草稿。自动同步与手动同步均可选。
 - **设置**：监控偏好、模块设置、数据操作和应用信息。
 
@@ -38,7 +42,7 @@ myserver/
 
 Android 公共层 `core/Feature.Host` 提供界面、导航、执行器和连接配置。模块在 `modules/<name>/` 实现 `Feature`，由 `MainActivity` 注册。终端独立使用 SSH shell；编译检查验证公共层和终端不依赖想法源码。连接配置、设备授权和 RPC 位于公共层；服务器、终端和设置均不依赖想法实现。模块通过 `Feature.renderSettings` 提供自己的设置，想法的数据与同步操作使用独立的 `ThoughtsHost` 合约。
 
-服务端统一运行在 `~/.local/share/myserver/`，通过 SSH 按需运行，使用公共数据库和设备权限；用户级 systemd 负责发布与备份定时任务。功能在 `server/modules/<name>/` 实现，在 `server/modules/__init__.py` 注册，声明自己的 RPC 路由与权限。公共认证、服务器指标与备份不依赖想法表；系统状态在 `modules` 字段下汇总模块数据。
+服务端统一运行在 `~/.local/share/myserver/`，App 通过 SSH 按需访问，使用公共数据库和设备权限；用户级 systemd 负责发布与备份定时任务。电脑端可用命令临时启动仅监听本机的收件箱 HTTP 管理页，经 SSH 转发后凭本次令牌登录。功能在 `server/modules/<name>/` 实现，在 `server/modules/__init__.py` 注册，声明自己的 RPC 路由与权限。公共认证、服务器指标与备份不依赖想法表；系统状态在 `modules` 字段下汇总模块数据。
 
 部署参数通过 App 设置、环境变量和 CI secrets 注入，示例见 [Android 配置](android/.env.example) 与 [部署配置](deploy/.env.example)。
 

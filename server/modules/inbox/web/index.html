@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>收件箱 · myserver</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <a class="brand" href="/">myserver <span>/ 收件箱</span></a
+        ><button id="logout" class="quiet" hidden>退出</button>
+      </header>
+      <main>
+        <section id="login">
+          <div class="eyebrow">PRIVATE INBOX</div>
+          <h1>让文件接着走。</h1>
+          <p class="intro">在手机、电脑与服务器之间，留一处自己的收件箱。</p>
+          <form id="login-form">
+            <label for="token">本次访问令牌</label>
+            <div class="input-row">
+              <input
+                id="token"
+                type="password"
+                required
+                autocomplete="off"
+                placeholder="粘贴命令行中的 token"
+              /><button type="submit">进入收件箱</button>
+            </div>
+          </form>
+          <p class="muted">从运行命令的终端获取令牌。</p>
+        </section>
+        <section id="workspace" hidden>
+          <div class="heading">
+            <div>
+              <div class="eyebrow">YOUR SPACE</div>
+              <h1>收件箱</h1>
+            </div>
+            <span id="storage" class="muted"></span>
+          </div>
+          <section class="composer" id="dropzone">
+            <textarea
+              id="text"
+              rows="3"
+              maxlength="20000"
+              placeholder="留一段文字、一个链接，或把文件拖到这里…"
+              aria-label="收件文字"
+            ></textarea>
+            <div id="selected"></div>
+            <div class="compose-tools">
+              <label class="file-button" for="files">＋ 添加文件</label
+              ><input id="files" type="file" multiple hidden /><span
+                class="muted"
+                >也可以直接粘贴图片</span
+              ><button id="send">发送到收件箱</button>
+            </div>
+          </section>
+          <section id="transfers" aria-label="传输队列"></section>
+          <div class="list-tools">
+            <input
+              id="search"
+              type="search"
+              placeholder="搜索标题、文字、备注与文件名"
+              aria-label="搜索收件"
+            /><button id="refresh" class="quiet">刷新</button>
+          </div>
+          <div id="items"></div>
+          <button id="more" class="quiet" hidden>加载更多</button>
+        </section>
+        <p id="message" role="status" aria-live="polite"></p>
+      </main>
+      <footer>myserver · 私有收件箱</footer>
+    </div>
+    <dialog id="edit">
+      <form method="dialog" id="edit-form">
+        <h2>编辑收件</h2>
+        <label for="edit-title">标题</label
+        ><input id="edit-title" maxlength="240" required /><label
+          for="edit-note"
+          >备注</label
+        ><textarea id="edit-note" maxlength="2000" rows="4"></textarea>
+        <div class="dialog-actions">
+          <button type="button" id="edit-cancel" class="quiet">取消</button
+          ><button type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

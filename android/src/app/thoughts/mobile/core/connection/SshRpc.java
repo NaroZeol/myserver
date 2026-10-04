@@ -38,7 +38,7 @@ public final class SshRpc {
       ).getBytes("UTF-8");
       if (payload.length > 140 * 1024) throw new ConnectionFailure(
         400,
-        "内容过长，请分成多条想法"
+        "请求内容过长，请减少本次操作的内容"
       );
       channel.setInputStream(new ByteArrayInputStream(payload));
       InputStream input = channel.getInputStream();

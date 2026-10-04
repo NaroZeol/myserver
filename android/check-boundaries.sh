@@ -7,6 +7,6 @@ cd "$(dirname "$0")"
 : "${ANDROID_BUILD_TOOLS:?Set ANDROID_BUILD_TOOLS}"
 rm -rf build/boundaries
 mkdir -p build/boundaries
-find src/app/thoughts/mobile/core src/app/thoughts/mobile/modules/terminal src/app/thoughts/mobile/modules/server src/app/thoughts/mobile/shell -name '*.java' -print > build/boundaries/sources.txt
+find src/app/thoughts/mobile/core src/app/thoughts/mobile/modules/terminal src/app/thoughts/mobile/modules/server src/app/thoughts/mobile/modules/inbox src/app/thoughts/mobile/shell -name '*.java' -print > build/boundaries/sources.txt
 "$JAVA_HOME/bin/javac" -encoding UTF-8 -source 8 -target 8 -sourcepath '' -bootclasspath "$ANDROID_JAR:$ANDROID_BUILD_TOOLS/core-lambda-stubs.jar" -classpath build/deps/jsch-android.jar -d build/boundaries/classes @build/boundaries/sources.txt
-echo 'PASS: core, server, terminal and settings compile independently of thoughts'
+echo 'PASS: core, server, terminal, inbox and settings compile independently of thoughts'

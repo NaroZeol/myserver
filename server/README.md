@@ -2,7 +2,7 @@
 
 [返回项目](../README.md) · [想法模块](modules/thoughts/README.md)
 
-App 通过 SSH 执行受限命令，网关验证设备与权限后直接调用业务模块。每次请求运行一个短进程，没有 HTTP 监听端口、Web 登录或常驻 API 进程。系统状态、公共数据库与备份独立于想法模块。
+App 通过 SSH 执行受限命令，网关验证设备与权限后直接调用业务模块；文件经独立二进制通道分块传输。常规访问不需要常驻 API 进程。电脑端可用命令临时开启仅监听本机的收件箱管理页，见[收件箱使用说明](../docs/inbox.md)。系统状态、公共数据库与备份独立于想法模块。
 
 ## 部署
 
@@ -40,7 +40,8 @@ loginctl show-user "$USER" -p Linger
 ├── credentials/thoughts-gist-token
 ├── devices/                    # 设备公钥、名称与权限
 ├── myserver.sqlite             # 模块业务数据
-├── backups/                    # 每日 SQLite 备份
+├── inbox/                      # 私有附件、未完成上传与文件锁
+├── backups/                    # 每日数据库和附件的完整备份
 ├── archives/                   # 部署回滚快照
 └── staged/                     # 待启用包（启用后移除）
 ```
@@ -60,18 +61,22 @@ systemctl --user list-timers 'myserver-*'
 journalctl --user -u myserver-publish.service -u myserver-backup.service -n 50
 ```
 
-设备登记默认授权已安装模块的能力；可用 `--capabilities system.read` 只授予系统状态读取权限。条目使用 `restrict` 和固定强制命令，只接受 `myserver-rpc-v1`。网关不执行客户端 shell 命令，不提供 SFTP 或转发，客户端不能自行提升权限；登记与撤销保留其他 SSH 公钥。App 终端使用独立密钥，具有 SSH 账户本身的 shell 权限。
+设备登记默认授权已安装模块的能力；可用 `--capabilities system.read` 只授予系统状态读取权限，或 `--add-capabilities inbox.read,inbox.write` 为已有设备明确追加收件箱权限。条目使用 `restrict` 和固定强制命令，只接受 `myserver-rpc-v1` 与 `myserver-transfer-v1`。网关不执行客户端 shell 命令，不提供 SFTP 或转发，客户端不能自行提升权限；登记与撤销保留其他 SSH 公钥。App 终端使用独立密钥，具有 SSH 账户本身的 shell 权限。
 
 用户级 systemd 仅管理两个定时任务：
 
 - `myserver-publish.timer` / `.service`：每分钟重试想法 Gist 发布队列。
-- `myserver-backup.timer` / `.service`：每日备份，成功后清理超过 30 天的日常备份文件。
+- `myserver-backup.timer` / `.service`：每日备份数据库和已完成收件箱附件，成功后清理超过 30 天的日常备份文件。每份归档包含完整附件，请为备份预留容量。
 
-手动备份使用 `python3 -S ~/.local/share/myserver/app/cli.py backup /path/to/new-backup.sqlite`，目标必须不存在。恢复数据库前，创建运行根目录下的 `maintenance` 文件，等待至少 45 秒让在途请求退出；停止两个定时器及对应服务，另存当前数据库与 WAL，再恢复备份。确保文件所有权与 `0600` 权限，运行 `cli.py check` 后启动定时器，最后移除 `maintenance` 文件。
+手动完整备份使用 `~/.local/bin/myserver backup-full /path/to/new-backup.tar`，目标必须不存在。`backup-unpack /path/to/backup.tar /path/to/new-directory` 将备份解包到新目录，并验证路径、数据库和附件摘要；它不会覆盖运行中的服务。原 `backup /path/to/new-backup.sqlite` 命令只导出数据库，不能单独恢复收件箱附件。
+
+恢复前创建运行根目录下的 `maintenance` 文件，停止两个定时器及对应服务、关闭临时 Web 入口，并取得 `operations.lock` 的独占锁，确保在途操作退出。另存当前数据库、WAL 和 `inbox`，将已校验解包的数据库与 `inbox/objects` 一起恢复；未完成上传不在备份中。保持目录 `0700`、文件 `0600` 和正确所有者，运行 `cli.py check` 后启动定时器，最后移除 `maintenance`。备份不含设备授权、凭据和服务器配置，需要另行妥善保存。
 
 ## 协议与开发
 
 每个 SSH exec 通道只收发一行 UTF-8 JSON。请求上限 140 KiB，响应上限 16 MiB，请求最长 45 秒。设备权限来自服务端登记文件，每次请求还会检查 `authorized_keys`，不创建登录会话。
+
+上述限制用于元数据 RPC。收件箱文件通道先交换有界 JSON 头，再流式传输最多 4 MiB 原始字节，块级超时 90 秒；同一 SSH 连接可打开多个通道，重连后查询已确认偏移继续。文件不编码进 RPC JSON。
 
 ```json
 {"path":"/system","method":"GET"}

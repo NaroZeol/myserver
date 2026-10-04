@@ -16,6 +16,8 @@ import app.thoughts.mobile.core.connection.ServerApi;
 import app.thoughts.mobile.core.connection.ServerProfile;
 import app.thoughts.mobile.core.connection.ShellIdentity;
 import app.thoughts.mobile.core.connection.SshConnection;
+import app.thoughts.mobile.modules.inbox.InboxUiChecks;
+import app.thoughts.mobile.modules.inbox.TransferChecks;
 import app.thoughts.mobile.modules.server.ServerChecks;
 import app.thoughts.mobile.modules.terminal.TerminalChecks;
 import app.thoughts.mobile.modules.thoughts.DeviceEnrollment;
@@ -129,10 +131,12 @@ public final class SmokeTest extends Instrumentation {
           )
         );
         final MainActivity screen = activity;
+        InboxUiChecks.seedVisual(getTargetContext());
         for (String page : new String[] {
           "capture",
           "notes",
           "server",
+          "inbox",
           "settings",
         }) {
           runOnMainSync(() -> screen.navigate(page));
@@ -426,9 +430,10 @@ public final class SmokeTest extends Instrumentation {
       }
       ServerChecks.run(this, screen);
       InteractionChecks.run(this, screen);
+      InboxUiChecks.run(this, screen);
       result.putString(
         "stream",
-        "PASS: native launch, offline capture, list rendering, draft persistence, edit/delete/restore/clear flows, feedback/search/cursor retention, in-flight edit preservation, SSH PTY and renderer\n"
+        "PASS: native launch, offline capture, list rendering, draft persistence, edit/delete/restore/clear flows, feedback/search/cursor retention, in-flight edit preservation, SSH PTY and renderer, private inbox resumable transfers\n"
       );
       finish(-1, result);
     } catch (Throwable error) {
@@ -660,6 +665,7 @@ public final class SmokeTest extends Instrumentation {
         .equals("ssh"),
       "An authorized shell identity must enroll service access without a second password"
     );
+    TransferChecks.run(this, restored);
     TerminalChecks.run(this, restored);
   }
 }

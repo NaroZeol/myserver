@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 fixture_dir="$HOME/.local/share/myserver"
 mkdir -p "$fixture_dir"/{app,deploy,devices,backups} build/ssh-fixture
 chmod 700 "$fixture_dir"
-tar -C ../server --exclude=__pycache__ --exclude=tests --exclude=README.md -cf - cli.py database.py rpc.py service.py paths.py ssh_gateway.py system_metrics.py modules | tar -xf - -C "$fixture_dir/app"
+tar -C ../server --exclude=__pycache__ --exclude=tests --exclude=README.md -cf - cli.py backups.py database.py rpc.py service.py paths.py ssh_gateway.py system_metrics.py modules | tar -xf - -C "$fixture_dir/app"
 cp ../deploy/{register-device.py,ssh-gateway.sh} "$fixture_dir/deploy/"
 chmod 700 "$fixture_dir/deploy/ssh-gateway.sh"
 python3 -S "$fixture_dir/app/cli.py" init

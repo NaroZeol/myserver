@@ -38,17 +38,38 @@ def backup(path, destination):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['init', 'check', 'backup'])
-    parser.add_argument('file', nargs='?', type=Path)
+    commands = parser.add_subparsers(dest='command', required=True)
+    commands.add_parser('init')
+    commands.add_parser('check')
+    for name in ('backup', 'backup-full'):
+        commands.add_parser(name).add_argument('file', type=Path)
+    unpack = commands.add_parser('backup-unpack')
+    unpack.add_argument('archive', type=Path)
+    unpack.add_argument('directory', type=Path)
+    from modules.inbox.cli import configure, run
+    configure(commands.add_parser('inbox', help='Private cross-device inbox'))
     args = parser.parse_args()
     path = database_path()
+    os.umask(0o077)
     if args.command == 'init':
         initialize(path)
     elif args.command == 'check':
         check(path)
-    else:
-        if not args.file: parser.error('backup requires a destination')
+    elif args.command == 'backup':
         backup(path, args.file)
+    elif args.command == 'backup-full':
+        from backups import full_backup
+        full_backup(path, args.file)
+    elif args.command == 'backup-unpack':
+        from backups import unpack_backup
+        unpack_backup(args.archive, args.directory)
+    else:
+        from rpc import RpcError
+        try:
+            run(args, path)
+        except (RpcError, OSError, ValueError) as error:
+            parser.exit(1, str(error) + '\n')
+        return
     print('myserver ' + args.command + ': OK')
 
 
