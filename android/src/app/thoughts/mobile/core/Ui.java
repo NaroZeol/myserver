@@ -16,7 +16,7 @@ import java.util.concurrent.ExecutorService;
 public class Ui {
 
   public static final int INK = Color.rgb(43, 41, 38),
-    MUTED = Color.rgb(125, 120, 111),
+    MUTED = Color.rgb(121, 116, 107),
     BLUE = Color.rgb(155, 90, 67),
     PAPER = Color.rgb(255, 254, 252),
     LINE = Color.rgb(235, 232, 226),
@@ -125,8 +125,8 @@ public class Ui {
     b.setMinHeight(dp(48));
     b.setTextColor(primary ? WHITE : INK);
     b.setPadding(dp(12), dp(8), dp(12), dp(8));
-    b.setMinWidth(0);
-    b.setMinimumWidth(0);
+    b.setMinWidth(dp(48));
+    b.setMinimumWidth(dp(48));
     b.setBackground(
       new RippleDrawable(
         ColorStateList.valueOf(0x189b5a43),
@@ -136,6 +136,77 @@ public class Ui {
     );
     b.setOnClickListener(v -> action.run());
     return b;
+  }
+
+  public ImageButton iconButton(String symbol, String label, Runnable action) {
+    return iconButton(activity, symbol, label, action, INK);
+  }
+
+  public ImageButton iconButton(
+    String symbol,
+    String label,
+    Runnable action,
+    int color
+  ) {
+    return iconButton(activity, symbol, label, action, color);
+  }
+
+  /** A 24 dp glyph inside a 48 dp button, with the same label for touch and assistive users. */
+  public static ImageButton iconButton(
+    Activity activity,
+    String symbol,
+    String label,
+    Runnable action,
+    int color
+  ) {
+    float density = activity.getResources().getDisplayMetrics().density;
+    int target = Math.round(48 * density),
+      padding = Math.round(12 * density);
+    ImageButton button = new ImageButton(activity);
+    button.setLayoutParams(new LinearLayout.LayoutParams(target, target));
+    button.setMinimumWidth(target);
+    button.setMinimumHeight(target);
+    button.setPadding(padding, padding, padding, padding);
+    button.setScaleType(ImageView.ScaleType.FIT_XY);
+    button.setImageDrawable(icon(symbol, color));
+    button.setImageTintList(
+      new ColorStateList(
+        new int[][] {
+          new int[] { -android.R.attr.state_enabled },
+          new int[] {},
+        },
+        new int[] { (color & 0x00ffffff) | 0x61000000, color }
+      )
+    );
+    button.setContentDescription(label);
+    button.setTooltipText(label);
+    button.setFocusable(true);
+    button.setStateListAnimator(null);
+    GradientDrawable mask = new GradientDrawable();
+    mask.setColor(Color.WHITE);
+    mask.setCornerRadius(8 * density);
+    button.setBackground(
+      new RippleDrawable(
+        ColorStateList.valueOf((color & 0x00ffffff) | 0x28000000),
+        null,
+        mask
+      )
+    );
+    button.setOnClickListener(view -> action.run());
+    return button;
+  }
+
+  /** Status is attached to content; it does not add another action or tab stop. */
+  public ImageView statusIcon(String symbol, String label) {
+    ImageView image = new ImageView(activity);
+    image.setImageDrawable(icon(symbol, MUTED));
+    image.setScaleType(ImageView.ScaleType.FIT_XY);
+    image.setLayoutParams(new LinearLayout.LayoutParams(dp(24), dp(24)));
+    image.setContentDescription(label);
+    image.setTooltipText(label);
+    image.setFocusable(false);
+    image.setClickable(false);
+    return image;
   }
 
   public EditText input(String hint, boolean multiline) {
@@ -260,7 +331,7 @@ public class Ui {
     );
   }
 
-  public Drawable icon(String id, int color) {
+  public static Drawable icon(String id, int color) {
     return new Drawable() {
       final Paint p = new Paint(3);
 
@@ -272,7 +343,55 @@ public class Ui {
         p.setStrokeWidth(1.7f);
         p.setStyle(Paint.Style.STROKE);
         p.setStrokeCap(Paint.Cap.ROUND);
-        if (id.equals("capture")) {
+        p.setStrokeJoin(Paint.Join.ROUND);
+        if (id.equals("back")) {
+          c.drawLine(5, 12, 20, 12, p);
+          c.drawLine(5, 12, 11, 6, p);
+          c.drawLine(5, 12, 11, 18, p);
+        } else if (id.equals("add")) {
+          c.drawLine(12, 5, 12, 19, p);
+          c.drawLine(5, 12, 19, 12, p);
+        } else if (id.equals("close")) {
+          c.drawLine(6, 6, 18, 18, p);
+          c.drawLine(18, 6, 6, 18, p);
+        } else if (id.equals("more")) {
+          p.setStyle(Paint.Style.FILL);
+          for (int y = 5; y <= 19; y += 7) c.drawCircle(12, y, 1.6f, p);
+        } else if (id.equals("filter")) {
+          c.drawLine(4, 6, 20, 6, p);
+          c.drawLine(7, 12, 17, 12, p);
+          c.drawLine(10, 18, 14, 18, p);
+        } else if (id.equals("copy")) {
+          c.drawRoundRect(8, 7, 20, 21, 2, 2, p);
+          Path rear = new Path();
+          rear.moveTo(5, 17);
+          rear.lineTo(3, 17);
+          rear.lineTo(3, 3);
+          rear.lineTo(16, 3);
+          rear.lineTo(16, 4);
+          c.drawPath(rear, p);
+        } else if (id.equals("share")) {
+          c.drawLine(8.5f, 10.7f, 15.5f, 6.3f, p);
+          c.drawLine(8.5f, 13.3f, 15.5f, 17.7f, p);
+          c.drawCircle(6, 12, 2.7f, p);
+          c.drawCircle(18, 5, 2.7f, p);
+          c.drawCircle(18, 19, 2.7f, p);
+        } else if (id.equals("download_done")) {
+          c.drawLine(5, 10, 9, 14, p);
+          c.drawLine(9, 14, 18, 5, p);
+          c.drawLine(5, 20, 19, 20, p);
+        } else if (id.equals("download") || id.equals("partial")) {
+          c.drawLine(12, 3, 12, 15, p);
+          c.drawLine(7, 10, 12, 15, p);
+          c.drawLine(12, 15, 17, 10, p);
+          c.drawLine(5, 20, 19, 20, p);
+        } else if (id.equals("check_box") || id.equals("check_box_outline")) {
+          c.drawRoundRect(3, 3, 21, 21, 3, 3, p);
+          if (id.equals("check_box")) {
+            c.drawLine(7, 12, 10.5f, 15.5f, p);
+            c.drawLine(10.5f, 15.5f, 17, 8, p);
+          }
+        } else if (id.equals("capture")) {
           Path pencil = new Path();
           pencil.moveTo(4, 20);
           pencil.lineTo(8, 20);

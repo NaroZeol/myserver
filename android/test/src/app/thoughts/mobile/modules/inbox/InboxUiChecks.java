@@ -320,10 +320,10 @@ public final class InboxUiChecks {
       test.runOnMainSync(() -> main.navigate("server"));
     }
     InboxPagingChecks.run(test, main);
+    InboxAvailabilityChecks.run(test, main);
   }
 
-  private static void capture(Instrumentation test, String name)
-    throws Exception {
+  static void capture(Instrumentation test, String name) throws Exception {
     test.waitForIdleSync();
     Thread.sleep(250);
     Bitmap image = test.getUiAutomation().takeScreenshot();

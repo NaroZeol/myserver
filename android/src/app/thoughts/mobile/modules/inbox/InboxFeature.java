@@ -45,6 +45,8 @@ public final class InboxFeature extends Ui implements Feature {
   private InboxThumbnails remoteThumbnails;
   private final LinkedHashMap<String, JSONObject> visibleItems =
     new LinkedHashMap<>();
+  private final Map<String, InboxStore.Task> downloadIndex = new HashMap<>();
+  private ServerProfile downloadProfile;
   private final LinkedHashMap<String, JSONObject> selected =
     new LinkedHashMap<>();
   private String source = "all",
@@ -64,7 +66,7 @@ public final class InboxFeature extends Ui implements Feature {
   private String query = "",
     filter = "all",
     detailId = "";
-  private boolean listening, loading, enableNeeded, updatePending;
+  private boolean listening, loading, enableNeeded, updatePending, selecting;
   private boolean listsInvalidated;
   private final Runnable update = () -> {
     updatePending = false;
@@ -120,12 +122,17 @@ public final class InboxFeature extends Ui implements Feature {
     return detailId.isEmpty() ? "添加" : "更多";
   }
 
+  public String headerIcon() {
+    return detailId.isEmpty() ? "add" : "more";
+  }
+
   public boolean hasBack() {
-    return !detailId.isEmpty() || !selected.isEmpty();
+    return !detailId.isEmpty() || selecting;
   }
 
   public void back() {
-    if (!selected.isEmpty()) {
+    if (selecting) {
+      selecting = false;
       selected.clear();
       updateEntries();
       updateSelection();
@@ -157,6 +164,9 @@ public final class InboxFeature extends Ui implements Feature {
       loading = loadingMore = false;
       searchResult = null;
       detailSnapshot = null;
+      detailId = "";
+      selected.clear();
+      selecting = false;
       renderedProfile = host.serverProfile();
     }
     content = surface;
@@ -179,8 +189,22 @@ public final class InboxFeature extends Ui implements Feature {
     );
     summary.setMaxLines(2);
     top.addView(summary, new LinearLayout.LayoutParams(0, -2, 1));
-    top.addView(button("本机文件", this::localFiles, false));
-    top.addView(button("刷新", this::refresh, false));
+    top.addView(iconButton("sync", "刷新", this::refresh));
+    top.addView(
+      iconButton("more", "收件箱操作", () ->
+        new AlertDialog.Builder(activity)
+          .setItems(new String[] { "选择条目" }, (d, w) -> {
+            if (visibleItems.isEmpty()) {
+              status("没有可选择的条目");
+              return;
+            }
+            selecting = true;
+            updateEntries();
+            updateSelection();
+          })
+          .show()
+      )
+    );
     surface.addView(top);
     if (profile == null) surface.addView(
       button("配置服务器", () -> host.navigate("server"), true)
@@ -208,6 +232,7 @@ public final class InboxFeature extends Ui implements Feature {
       Button b = button(
         names[i],
         () -> {
+          boolean leavingLocal = localOnly();
           filter = next;
           for (int j = 0; j < filters.getChildCount(); j++) {
             View child = filters.getChildAt(j);
@@ -216,6 +241,7 @@ public final class InboxFeature extends Ui implements Feature {
             ((Button) child).setTextColor(chosen ? BLUE : MUTED);
           }
           scheduleSearch();
+          if (leavingLocal) host.redraw();
         },
         false
       );
@@ -224,7 +250,12 @@ public final class InboxFeature extends Ui implements Feature {
       b.setTextColor(filter.equals(next) ? BLUE : MUTED);
       filters.addView(b, new LinearLayout.LayoutParams(0, dp(48), 1));
     }
-    Button moreFilters = button("筛选", this::filterMenu, false);
+    Button moreFilters = button(
+      localOnly() ? "已下载" : "筛选",
+      this::filterMenu,
+      false
+    );
+    moreFilters.setContentDescription("筛选");
     moreFilters.setTextColor(
       (!filter.equals("all") &&
         !filter.equals("files") &&
@@ -304,6 +335,7 @@ public final class InboxFeature extends Ui implements Feature {
 
   private void scheduleSearch() {
     selected.clear();
+    selecting = false;
     updateSelection();
     handler.removeCallbacks(searchRemote);
     requestGeneration++;
@@ -318,6 +350,10 @@ public final class InboxFeature extends Ui implements Feature {
     handler.removeCallbacks(searchRemote);
     searchPending = false;
     loadPage(false, true);
+  }
+
+  private boolean localOnly() {
+    return filter.equals("downloaded");
   }
 
   private String filterKey() {
@@ -340,6 +376,7 @@ public final class InboxFeature extends Ui implements Feature {
         "archive",
         "apk",
         "other",
+        "downloaded",
       },
       labels = {
         "全部",
@@ -352,6 +389,7 @@ public final class InboxFeature extends Ui implements Feature {
         "压缩包",
         "安装包",
         "其他",
+        "已下载",
       };
     for (int i = 0; i < keys.length; i++) if (
       keys[i].equals(type)
@@ -363,8 +401,20 @@ public final class InboxFeature extends Ui implements Feature {
     new AlertDialog.Builder(activity)
       .setTitle("筛选与排序")
       .setItems(
-        new String[] { "文件类型", "来源", "时间", "排序", "重置筛选" },
+        new String[] {
+          "文件类型",
+          "来源",
+          "时间",
+          "排序",
+          "已下载",
+          "重置筛选",
+          "其他服务器的下载",
+        },
         (d, w) -> {
+          if (w == 6) {
+            otherDownloads();
+            return;
+          }
           String[][] ids = {
             {
               "all",
@@ -399,8 +449,8 @@ public final class InboxFeature extends Ui implements Feature {
             { "不限时间", "最近 7 天", "最近 30 天" },
             { "最新优先", "最早优先", "名称", "文件大小" },
           };
-          if (w == 4) {
-            filter = "all";
+          if (w == 4 || w == 5) {
+            filter = w == 4 ? "downloaded" : "all";
             source = "all";
             sort = "newest";
             since = 0;
@@ -438,6 +488,7 @@ public final class InboxFeature extends Ui implements Feature {
         "取消",
         () -> {
           selected.clear();
+          selecting = false;
           updateEntries();
           updateSelection();
         },
@@ -457,12 +508,12 @@ public final class InboxFeature extends Ui implements Feature {
       ),
       new LinearLayout.LayoutParams(0, -2, 1)
     );
-    actions.addView(
+    if (!localOnly()) actions.addView(
       button("下载", () -> batch(false), false),
       new LinearLayout.LayoutParams(0, -2, 1)
     );
     actions.addView(
-      button("删除", () -> batch(true), false),
+      button(localOnly() ? "移除副本" : "删除", () -> batch(true), false),
       new LinearLayout.LayoutParams(0, -2, 1)
     );
     selectionBar.addView(actions);
@@ -472,12 +523,13 @@ public final class InboxFeature extends Ui implements Feature {
 
   private void updateSelection() {
     if (selectionBar != null) {
-      selectionBar.setVisibility(selected.isEmpty() ? View.GONE : View.VISIBLE);
+      selectionBar.setVisibility(selecting ? View.VISIBLE : View.GONE);
       selectionCount.setText("已选 " + selected.size() + " 项");
     }
   }
 
   private void toggle(JSONObject item) {
+    selecting = true;
     String id = item.optString("id");
     if (selected.containsKey(id)) selected.remove(id);
     else selected.put(id, item);
@@ -488,6 +540,32 @@ public final class InboxFeature extends Ui implements Feature {
   private void batch(boolean deleting) {
     List<JSONObject> items = new ArrayList<>(selected.values());
     if (items.isEmpty()) return;
+    if (localOnly()) {
+      new AlertDialog.Builder(activity)
+        .setTitle("移除所选手机副本？")
+        .setMessage("仅移除手机副本，不修改服务器。")
+        .setNegativeButton("取消", null)
+        .setPositiveButton("移除", (d, w) -> {
+          try {
+            for (InboxStore.Task task : localTasks())
+              if (
+                available(task) &&
+                selected.containsKey(
+                  task.document.optJSONObject("item").optString("id")
+                )
+              ) store.removeTask(task.id);
+            selected.clear();
+            selecting = false;
+            updateSelection();
+            updateLists();
+          } catch (Exception e) {
+            status("部分副本未移除，请重试");
+            updateLists();
+          }
+        })
+        .show();
+      return;
+    }
     Runnable run = () -> {
       ServerProfile profile = host.serverProfile();
       WORK.execute(() -> {
@@ -525,6 +603,7 @@ public final class InboxFeature extends Ui implements Feature {
           total = files;
         runOnUiThread(() -> {
           selected.clear();
+          selecting = false;
           updateSelection();
           if (deleting) {
             try {
@@ -583,6 +662,15 @@ public final class InboxFeature extends Ui implements Feature {
 
   private void loadPage(boolean more, boolean force) {
     final ServerProfile profile = host.serverProfile();
+    if (localOnly()) {
+      searchPending = loading = loadingMore = false;
+      remoteFailed = false;
+      if (summary != null) summary.setText(
+        profile == null ? "尚未连接服务器" : profile.name
+      );
+      updateLists();
+      return;
+    }
     if (loading || profile == null || content == null) {
       searchPending = false;
       return;
@@ -730,7 +818,7 @@ public final class InboxFeature extends Ui implements Feature {
     }
     if (tasks == null) return;
     drafts.removeAllViews();
-    JSONArray pending = localDrafts();
+    JSONArray pending = localOnly() ? new JSONArray() : localDrafts();
     for (int i = 0; i < pending.length(); i++) {
       JSONObject draft = pending.optJSONObject(i);
       if (draft == null) continue;
@@ -744,7 +832,9 @@ public final class InboxFeature extends Ui implements Feature {
       );
     }
     tasks.removeAllViews();
-    for (InboxStore.Task task : localTasks()) {
+    for (InboxStore.Task task : localOnly()
+      ? Collections.<InboxStore.Task>emptyList()
+      : localTasks()) {
       if (task.state.equals("done") || task.state.equals("canceled")) continue;
       taskRow(tasks, task);
     }
@@ -753,12 +843,14 @@ public final class InboxFeature extends Ui implements Feature {
 
   private void updateEntries() {
     if (entries == null) return;
+    indexDownloads();
     entries.removeAllViews();
     visibleItems.clear();
     thumbnailCount = 0;
     if (
-      enableNeeded ||
-      (host.serverProfile() != null && !host.account().can("inbox.write"))
+      !localOnly() &&
+      (enableNeeded ||
+        (host.serverProfile() != null && !host.account().can("inbox.write")))
     ) entries.addView(button("启用收件箱", this::enable, true));
     JSONArray all =
       host.serverProfile() == null ? new JSONArray() : localEntries();
@@ -776,7 +868,8 @@ public final class InboxFeature extends Ui implements Feature {
       if (
         !filter.equals("all") &&
         !filter.equals("files") &&
-        !filter.equals("text")
+        !filter.equals("text") &&
+        !localOnly()
       ) {
         boolean matches = false;
         if (files != null) for (int f = 0; f < files.length(); f++) {
@@ -829,9 +922,11 @@ public final class InboxFeature extends Ui implements Feature {
         .append(item.optString("text"))
         .append(' ')
         .append(item.optString("note"));
-      if (files != null) for (int f = 0; f < files.length(); f++) haystack
-        .append(' ')
-        .append(files.optJSONObject(f).optString("name"));
+      if (files != null) for (int f = 0; f < files.length(); f++) {
+        JSONObject attachment = files.optJSONObject(f);
+        if (localOnly() && !available(download(item, attachment))) continue;
+        haystack.append(' ').append(attachment.optString("name"));
+      }
       if (
         !haystack.toString().toLowerCase(Locale.ROOT).contains(needle)
       ) continue;
@@ -854,30 +949,61 @@ public final class InboxFeature extends Ui implements Feature {
       String created = date(item.optString("created_at"));
       if (!created.isEmpty()) detail += " · " + created;
       visibleItems.put(item.optString("id"), item);
-      LinearLayout row = rowLink(
-        entries,
-        (selected.containsKey(item.optString("id")) ? "✓  " : "") +
-          display(item),
-        detail,
-        () -> {
-          if (!selected.isEmpty()) {
-            toggle(item);
-            return;
+      LinearLayout row = rowLink(entries, display(item), detail, () -> {
+        if (selecting) {
+          toggle(item);
+          return;
+        }
+        detailId = item.optString("id");
+        detailSnapshot = item;
+        host.redraw();
+      });
+      TextView heading = (TextView) row.getChildAt(0);
+      if (selecting) {
+        boolean chosen = selected.containsKey(item.optString("id"));
+        android.graphics.drawable.Drawable box = icon(
+          chosen ? "check_box" : "check_box_outline",
+          INK
+        );
+        box.setBounds(0, 0, dp(22), dp(22));
+        heading.setCompoundDrawables(box, null, null, null);
+        heading.setCompoundDrawablePadding(dp(8));
+        heading.setContentDescription(
+          (chosen ? "已选中，" : "未选中，") + display(item)
+        );
+      }
+      row.setAccessibilityDelegate(
+        new View.AccessibilityDelegate() {
+          @Override
+          public void onInitializeAccessibilityNodeInfo(
+            View hostView,
+            android.view.accessibility.AccessibilityNodeInfo info
+          ) {
+            super.onInitializeAccessibilityNodeInfo(hostView, info);
+            if (selecting) {
+              info.setCheckable(true);
+              info.setChecked(selected.containsKey(item.optString("id")));
+              info.setClassName("android.widget.CheckBox");
+            }
           }
-          detailId = item.optString("id");
-          detailSnapshot = item;
-          host.redraw();
         }
       );
+      row.setTooltipText("长按选择条目");
+      appendDownloadStatus(row, completedCount(item), count);
       row.setOnLongClickListener(v -> {
         toggle(item);
         return true;
       });
-      if (files != null && files.length() > 0) thumbnail(
-        row,
-        item,
-        files.optJSONObject(0)
-      );
+      if (files != null && files.length() > 0) {
+        JSONObject cover = files.optJSONObject(0);
+        if (localOnly()) for (int f = 0; f < files.length(); f++) {
+          if (available(download(item, files.optJSONObject(f)))) {
+            cover = files.optJSONObject(f);
+            break;
+          }
+        }
+        thumbnail(row, item, cover);
+      }
       shown++;
     }
     if (shown == 0) {
@@ -896,7 +1022,7 @@ public final class InboxFeature extends Ui implements Feature {
     }
     JSONObject response = visibleResponse();
     boolean validPage = defaultQuery() || resultMatches();
-    if (validPage && response.optBoolean("has_more")) {
+    if (!localOnly() && validPage && response.optBoolean("has_more")) {
       Button more = button(
         loadingMore ? "正在加载…" : "加载更多",
         () -> loadPage(true),
@@ -905,12 +1031,13 @@ public final class InboxFeature extends Ui implements Feature {
       more.setEnabled(!loading && !searchPending);
       entries.addView(more, new LinearLayout.LayoutParams(-1, dp(48)));
     }
-    if (remoteFailed && !enableNeeded) entries.addView(
+    if (!localOnly() && remoteFailed && !enableNeeded) entries.addView(
       button("重试", this::refresh, false)
     );
   }
 
   private void renderDetail(LinearLayout surface) {
+    indexDownloads();
     JSONObject item = item(detailId);
     if (item == null) {
       surface.addView(text("条目已删除，或尚未缓存。", 15, MUTED));
@@ -952,19 +1079,42 @@ public final class InboxFeature extends Ui implements Feature {
     JSONArray files = item.optJSONArray("files");
     if (files != null && files.length() > 0) {
       space(surface, 24);
-      surface.addView(text("文件 · " + files.length(), 12, MUTED));
+      surface.addView(
+        text(
+          localOnly()
+            ? "手机副本 · " + completedCount(item) + "/" + files.length()
+            : "文件 · " + files.length(),
+          12,
+          MUTED
+        )
+      );
       for (int i = 0; i < files.length(); i++) {
         JSONObject file = files.optJSONObject(i);
         if (file == null) continue;
         InboxStore.Task local = download(item, file);
-        String state =
-          local != null && local.state.equals("done") ? "已下载" : "下载 ↓";
-        rowLink(
+        boolean ready = available(local);
+        if (localOnly() && !ready) continue;
+        LinearLayout row = rowLink(
           surface,
           file.optString("name", "文件"),
-          size(file.optLong("size")) + " · " + state,
+          size(file.optLong("size")),
           () -> fileMenu(item, file)
         );
+        appendDownloadStatus(row, ready ? 1 : 0, 1);
+        if (ready) {
+          LinearLayout metadata = (LinearLayout) row.getChildAt(
+            row.getChildCount() - 1
+          );
+          metadata.addView(
+            iconButton("more", "文件操作：" + file.optString("name"), () ->
+              localFileMenu(local)
+            )
+          );
+          row.setOnLongClickListener(v -> {
+            localFileMenu(local);
+            return true;
+          });
+        }
         if (
           local != null &&
           !local.state.equals("done") &&
@@ -985,6 +1135,25 @@ public final class InboxFeature extends Ui implements Feature {
 
   private JSONArray localEntries() {
     try {
+      if (localOnly()) {
+        LinkedHashMap<String, JSONObject> downloaded = new LinkedHashMap<>();
+        for (InboxStore.Task task : localTasks())
+          if (available(task)) {
+            JSONObject item = task.document.getJSONObject("item");
+            downloaded.putIfAbsent(item.getString("id"), item);
+          }
+        List<JSONObject> sorted = new ArrayList<>(downloaded.values());
+        sorted.sort((a, b) ->
+          sort.equals("name")
+            ? display(a).compareToIgnoreCase(display(b))
+            : sort.equals("size")
+              ? Long.compare(b.optLong("total_size"), a.optLong("total_size"))
+              : sort.equals("oldest")
+                ? a.optString("created_at").compareTo(b.optString("created_at"))
+                : b.optString("created_at").compareTo(a.optString("created_at"))
+        );
+        return new JSONArray(sorted);
+      }
       JSONArray entries = visibleResponse().optJSONArray("items");
       return entries == null ? new JSONArray() : entries;
     } catch (Exception e) {
@@ -1002,17 +1171,27 @@ public final class InboxFeature extends Ui implements Feature {
     }
   }
 
+  private void indexDownloads() {
+    downloadProfile = host.serverProfile();
+    downloadIndex.clear();
+    for (InboxStore.Task task : localTasks())
+      if (task.kind.equals("download") && !task.state.equals("canceled")) {
+        JSONObject item = task.document.optJSONObject("item"),
+          file = task.document.optJSONObject("file");
+        if (item != null && file != null) downloadIndex.putIfAbsent(
+          item.optString("id") + "\n" + file.optString("id"),
+          task
+        );
+      }
+  }
+
   private InboxStore.Task download(JSONObject item, JSONObject file) {
-    try {
-      return store.findDownload(
-        host.serverProfile(),
-        item.optString("id"),
-        file.optString("id")
-      );
-    } catch (Exception e) {
-      status("无法读取下载记录");
-      return null;
-    }
+    if (
+      !InboxStore.sameIdentity(downloadProfile, host.serverProfile())
+    ) indexDownloads();
+    return downloadIndex.get(
+      item.optString("id") + "\n" + file.optString("id")
+    );
   }
 
   private JSONObject item(String id) {
@@ -1041,7 +1220,7 @@ public final class InboxFeature extends Ui implements Feature {
     image.setContentDescription("预览 " + file.optString("name"));
     row.addView(image, 0, new LinearLayout.LayoutParams(-1, dp(132)));
     image.setOnClickListener(v -> {
-      if (!selected.isEmpty()) toggle(item);
+      if (selecting) toggle(item);
       else fileMenu(item, file);
     });
     image.setOnLongClickListener(v -> {
@@ -1049,7 +1228,7 @@ public final class InboxFeature extends Ui implements Feature {
       return true;
     });
     InboxStore.Task task = download(item, file);
-    if (task != null && task.state.equals("done")) {
+    if (available(task)) {
       android.graphics.Bitmap cached = thumbnails.get(task.id);
       if (cached != null) {
         image.setImageBitmap(cached);
@@ -1070,7 +1249,9 @@ public final class InboxFeature extends Ui implements Feature {
       return;
     }
     if (
-      !InboxThumbnails.eligible(file) || !host.account().can("inbox.read")
+      localOnly() ||
+      !InboxThumbnails.eligible(file) ||
+      !host.account().can("inbox.read")
     ) return;
     final boolean[] started = { false };
     final android.graphics.Rect visible = new android.graphics.Rect();
@@ -1118,80 +1299,178 @@ public final class InboxFeature extends Ui implements Feature {
     );
   }
 
-  private void localFiles() {
+  private boolean available(InboxStore.Task task) {
+    if (
+      task == null ||
+      !task.kind.equals("download") ||
+      !task.state.equals("done")
+    ) return false;
     try {
-      List<InboxStore.Task> downloads = new ArrayList<>();
-      for (InboxStore.Task task : store.tasks())
-        if (
-          task.kind.equals("download") && task.state.equals("done")
-        ) downloads.add(task);
-      if (downloads.isEmpty()) {
-        new AlertDialog.Builder(activity)
-          .setTitle("本机文件")
-          .setMessage("还没有下载到手机的文件。")
-          .setPositiveButton("知道了", null)
-          .show();
-        return;
-      }
-      String[] names = new String[downloads.size()];
-      for (int i = 0; i < names.length; i++) {
-        InboxStore.Task task = downloads.get(i);
-        names[i] =
-          task.document.optJSONObject("file").optString("name") +
-          "\n" +
-          size(task.total) +
-          " · " +
-          task.profile.name;
-      }
-      new AlertDialog.Builder(activity)
-        .setTitle("本机文件")
-        .setItems(names, (dialog, which) -> {
-          InboxStore.Task task = downloads.get(which);
-          new AlertDialog.Builder(activity)
-            .setTitle(task.document.optJSONObject("file").optString("name"))
-            .setItems(new String[] { "打开", "移除本机副本" }, (d, action) -> {
-              if (action == 0) {
-                if (
-                  InboxMedia.preview(task.document.optJSONObject("file"))
-                ) activity.startActivity(
-                  new Intent(activity, InboxPreviewActivity.class).putExtra(
-                    "task_id",
-                    task.id
-                  )
-                );
-                else InboxFiles.open(activity, task);
-              } else new AlertDialog.Builder(activity)
-                .setTitle("移除本机副本？")
-                .setMessage("服务器上的文件会保留。")
-                .setNegativeButton("取消", null)
-                .setPositiveButton("移除", (confirm, w) -> {
-                  try {
-                    store.removeTask(task.id);
-                    updateLists();
-                    status("已移除本机副本");
-                  } catch (Exception e) {
-                    status("文件移除失败，请重试");
-                  }
-                })
-                .show();
-            })
-            .show();
-        })
-        .setNegativeButton("关闭", null)
-        .show();
-    } catch (Exception e) {
-      status("无法读取本机文件");
+      return store.localFile(task).isFile();
+    } catch (Exception ignored) {
+      return false;
     }
   }
 
+  private int completedCount(JSONObject item) {
+    JSONArray files = item.optJSONArray("files");
+    int count = 0;
+    if (files != null) for (int i = 0; i < files.length(); i++) if (
+      available(download(item, files.optJSONObject(i)))
+    ) count++;
+    return count;
+  }
+
+  private void appendDownloadStatus(
+    LinearLayout row,
+    int completed,
+    int total
+  ) {
+    if (total == 0 || completed == 0) return;
+    int index = row.getChildCount() - 1;
+    View subtitle = row.getChildAt(index);
+    row.removeViewAt(index);
+    LinearLayout line = new LinearLayout(activity);
+    line.setGravity(Gravity.CENTER_VERTICAL);
+    line.addView(subtitle, new LinearLayout.LayoutParams(0, -2, 1));
+    String label =
+      completed == total
+        ? "已下载到手机"
+        : "已下载 " + completed + "/" + total + " 个文件";
+    line.addView(
+      statusIcon(completed == total ? "download_done" : "partial", label)
+    );
+    if (completed > 0 && completed < total) {
+      TextView fraction = text(completed + "/" + total, 12, MUTED);
+      fraction.setPadding(dp(4), 0, 0, 0);
+      line.addView(fraction);
+    }
+    row.addView(line);
+  }
+
+  private void removeLocal(InboxStore.Task task) {
+    new AlertDialog.Builder(activity)
+      .setTitle("移除手机副本？")
+      .setMessage("仅移除手机副本，不修改服务器。")
+      .setNegativeButton("取消", null)
+      .setPositiveButton("移除", (d, w) -> {
+        try {
+          store.removeTask(task.id);
+          if (localOnly()) {
+            detailId = "";
+            detailSnapshot = null;
+            host.redraw();
+          } else updateLists();
+          status("已移除手机副本");
+        } catch (Exception e) {
+          status("移除失败，请重试");
+        }
+      })
+      .show();
+  }
+
+  private void otherDownloads() {
+    try {
+      List<InboxStore.Task> copies = new ArrayList<>();
+      for (InboxStore.Task task : store.tasks())
+        if (
+          !InboxStore.sameIdentity(task.profile, host.serverProfile()) &&
+          available(task)
+        ) copies.add(task);
+      if (copies.isEmpty()) {
+        status("没有其他服务器的手机副本");
+        return;
+      }
+      String[] names = new String[copies.size()];
+      for (int i = 0; i < names.length; i++) {
+        InboxStore.Task task = copies.get(i);
+        names[i] =
+          task.document.optJSONObject("file").optString("name") +
+          "\n" +
+          task.profile.name +
+          " · " +
+          task.profile.host;
+      }
+      new AlertDialog.Builder(activity)
+        .setTitle("其他服务器的下载")
+        .setItems(names, (d, w) -> localFileMenu(copies.get(w)))
+        .setNegativeButton("关闭", null)
+        .show();
+    } catch (Exception e) {
+      status("无法读取手机副本");
+    }
+  }
+
+  private void localFileMenu(InboxStore.Task local) {
+    JSONObject file = local.document.optJSONObject("file");
+    new AlertDialog.Builder(activity)
+      .setTitle(file.optString("name"))
+      .setItems(
+        new String[] {
+          file.optString("name").toLowerCase(Locale.ROOT).endsWith(".apk")
+            ? "安装应用"
+            : "打开",
+          "分享",
+          "另存为",
+          "移除手机副本",
+        },
+        (d, which) -> {
+          try {
+            if (which == 0) {
+              if (InboxMedia.preview(file)) activity.startActivity(
+                new Intent(activity, InboxPreviewActivity.class).putExtra(
+                  "task_id",
+                  local.id
+                )
+              );
+              else InboxFiles.open(activity, local);
+            } else if (which == 1) InboxFiles.share(activity, local);
+            else if (which == 3) removeLocal(local);
+            else {
+              activity
+                .getSharedPreferences("inbox_ui", 0)
+                .edit()
+                .putString("save_task", local.id)
+                .commit();
+              activity.startActivityForResult(
+                new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                  .addCategory(Intent.CATEGORY_OPENABLE)
+                  .setType(InboxMedia.mime(file))
+                  .putExtra(Intent.EXTRA_TITLE, file.optString("name", "文件")),
+                SAVE_FILE
+              );
+            }
+          } catch (Exception e) {
+            status(e.getMessage() == null ? "无法打开文件" : e.getMessage());
+          }
+        }
+      )
+      .show();
+  }
+
   private void fileMenu(JSONObject item, JSONObject file) {
+    indexDownloads();
     InboxStore.Task local = download(item, file);
+    if (available(local)) {
+      if (InboxMedia.preview(file)) activity.startActivity(
+        new Intent(activity, InboxPreviewActivity.class).putExtra(
+          "task_id",
+          local.id
+        )
+      );
+      else localFileMenu(local);
+      return;
+    }
+    if (localOnly()) {
+      status("手机副本已移除");
+      updateLists();
+      return;
+    }
     if (InboxMedia.preview(file)) {
       try {
-        InboxStore.Task preview =
-          local == null || !local.state.equals("done")
-            ? store.enqueueDownload(host.serverProfile(), item, file)
-            : local;
+        InboxStore.Task preview = !available(local)
+          ? store.enqueueDownload(host.serverProfile(), item, file)
+          : local;
         activity.startActivity(
           new Intent(activity, InboxPreviewActivity.class).putExtra(
             "task_id",
@@ -1203,8 +1482,12 @@ public final class InboxFeature extends Ui implements Feature {
       }
       return;
     }
-    if (local == null || !local.state.equals("done")) {
-      if (local != null && !local.state.equals("canceled")) {
+    if (!available(local)) {
+      if (
+        local != null &&
+        !local.state.equals("canceled") &&
+        !local.state.equals("done")
+      ) {
         status("请在传输任务中继续下载");
         return;
       }
@@ -1217,40 +1500,6 @@ public final class InboxFeature extends Ui implements Feature {
       }
       return;
     }
-    new AlertDialog.Builder(activity)
-      .setTitle(file.optString("name"))
-      .setItems(
-        new String[] {
-          file.optString("name").toLowerCase(Locale.ROOT).endsWith(".apk")
-            ? "安装应用"
-            : "打开",
-          "另存为…",
-          "分享…",
-        },
-        (d, which) -> {
-          try {
-            if (which == 0) InboxFiles.open(activity, local);
-            else if (which == 2) InboxFiles.share(activity, local);
-            else {
-              activity
-                .getSharedPreferences("inbox_ui", 0)
-                .edit()
-                .putString("save_task", local.id)
-                .commit();
-              activity.startActivityForResult(
-                new Intent(Intent.ACTION_CREATE_DOCUMENT)
-                  .addCategory(Intent.CATEGORY_OPENABLE)
-                  .setType(file.optString("mime", "application/octet-stream"))
-                  .putExtra(Intent.EXTRA_TITLE, file.optString("name", "文件")),
-                SAVE_FILE
-              );
-            }
-          } catch (Exception e) {
-            status(e.getMessage() == null ? "无法打开文件" : e.getMessage());
-          }
-        }
-      )
-      .show();
   }
 
   static boolean requestNotifications(Activity activity) {
@@ -1311,6 +1560,30 @@ public final class InboxFeature extends Ui implements Feature {
   }
 
   private void itemMenu(JSONObject item) {
+    if (localOnly()) {
+      List<InboxStore.Task> copies = new ArrayList<>();
+      for (InboxStore.Task task : localTasks())
+        if (
+          available(task) &&
+          task.document
+            .optJSONObject("item")
+            .optString("id")
+            .equals(item.optString("id"))
+        ) copies.add(task);
+      if (copies.size() == 1) localFileMenu(copies.get(0));
+      else {
+        String[] names = new String[copies.size()];
+        for (int i = 0; i < names.length; i++) names[i] = copies
+          .get(i)
+          .document.optJSONObject("file")
+          .optString("name");
+        new AlertDialog.Builder(activity)
+          .setTitle("手机副本")
+          .setItems(names, (d, w) -> localFileMenu(copies.get(w)))
+          .show();
+      }
+      return;
+    }
     new AlertDialog.Builder(activity)
       .setTitle("条目操作")
       .setItems(new String[] { "重命名", "删除" }, (d, which) -> {

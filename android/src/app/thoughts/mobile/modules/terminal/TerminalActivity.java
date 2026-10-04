@@ -13,6 +13,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
+import app.thoughts.mobile.core.Ui;
 import app.thoughts.mobile.core.connection.ServerProfile;
 import app.thoughts.mobile.core.connection.ShellIdentity;
 import java.nio.charset.StandardCharsets;
@@ -76,10 +77,14 @@ public final class TerminalActivity extends Activity {
     });
     header = new LinearLayout(this);
     header.setGravity(Gravity.CENTER_VERTICAL);
-    header.addView(button("返回", () -> onBackPressed()));
+    header.addView(
+      Ui.iconButton(this, "back", "返回", this::onBackPressed, FOREGROUND)
+    );
     TextView name = text(profile.name, 15, FOREGROUND);
     name.setSingleLine(true);
     name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    name.setTooltipText(profile.name);
+    name.setPadding(dp(8), 0, dp(8), 0);
     header.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
     connect = button("连接", () -> {
       if (busy) disconnectPrompt();
@@ -89,18 +94,22 @@ public final class TerminalActivity extends Activity {
     keyboardButton = button("键盘", () -> toggleKeyboard());
     header.addView(keyboardButton);
     header.addView(connect);
-    header.addView(button("更多", () -> menu()));
+    header.addView(Ui.iconButton(this, "more", "更多", this::menu, FOREGROUND));
     FrameLayout top = new FrameLayout(this);
     top.addView(header, new FrameLayout.LayoutParams(-1, dp(48)));
     selectionHeader = new LinearLayout(this);
     selectionHeader.setGravity(Gravity.CENTER_VERTICAL);
     TextView selectionLabel = text("选择文字", 14, FOREGROUND);
+    selectionLabel.setSingleLine(true);
+    selectionLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
     selectionLabel.setPadding(dp(12), 0, 0, 0);
     selectionHeader.addView(
       selectionLabel,
       new LinearLayout.LayoutParams(0, -2, 1)
     );
-    selectionHeader.addView(button("复制", () -> copySelection()));
+    selectionHeader.addView(
+      Ui.iconButton(this, "copy", "复制", this::copySelection, FOREGROUND)
+    );
     selectionHeader.addView(
       button("全选", () -> terminal.call("selectAll", ""))
     );
@@ -119,11 +128,9 @@ public final class TerminalActivity extends Activity {
     feedbackRow.setGravity(Gravity.CENTER_VERTICAL);
     feedbackRow.addView(feedback, new LinearLayout.LayoutParams(0, -2, 1));
     inputModeButton = button("", () -> chooseKeyboard());
-    inputModeButton.setMinHeight(dp(36));
-    inputModeButton.setMinimumHeight(dp(36));
     feedbackRow.addView(
       inputModeButton,
-      new LinearLayout.LayoutParams(-2, dp(36))
+      new LinearLayout.LayoutParams(-2, dp(48))
     );
     root.addView(feedbackRow);
     workspace = new LinearLayout(this);
@@ -226,6 +233,7 @@ public final class TerminalActivity extends Activity {
       if (!label.contentEquals(keyboardButton.getText())) {
         keyboardButton.setText(label);
         keyboardButton.setContentDescription(visible ? "收起键盘" : "显示键盘");
+        keyboardButton.setTooltipText(visible ? "收起键盘" : "显示键盘");
       }
     });
     setContentView(root);
@@ -259,9 +267,10 @@ public final class TerminalActivity extends Activity {
     b.setText(label);
     b.setTextSize(12);
     b.setAllCaps(false);
+    b.setTooltipText(label);
     b.setTextColor(FOREGROUND);
-    b.setMinWidth(0);
-    b.setMinimumWidth(0);
+    b.setMinWidth(dp(48));
+    b.setMinimumWidth(dp(48));
     b.setMinHeight(dp(48));
     b.setMinimumHeight(dp(48));
     b.setPadding(dp(10), 0, dp(10), 0);
@@ -386,8 +395,11 @@ public final class TerminalActivity extends Activity {
           )
         : new LinearLayout.LayoutParams(-1, dp(208))
     );
-    inputModeButton.setText(internalKeyboard ? "内置键盘 ▾" : "系统输入法 ▾");
-    inputModeButton.setContentDescription("切换输入方式");
+    String mode = internalKeyboard ? "内置键盘" : "系统输入法";
+    String description = "切换输入方式，当前：" + mode;
+    inputModeButton.setText(mode + " ▾");
+    inputModeButton.setContentDescription(description);
+    inputModeButton.setTooltipText(description);
   }
 
   private void setFont(int size) {
@@ -543,6 +555,7 @@ public final class TerminalActivity extends Activity {
           ? "重连"
           : "连接"
     );
+    connect.setTooltipText(connect.getText());
     feedback.setText(runtime.status);
     placeholder.setVisibility(runtime.attempted ? View.GONE : View.VISIBLE);
     if (!busy) {

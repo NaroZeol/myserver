@@ -7,6 +7,7 @@ import android.net.Uri;
 import android.os.*;
 import android.view.*;
 import android.widget.*;
+import app.thoughts.mobile.core.Ui;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.*;
@@ -63,10 +64,13 @@ public final class InboxPreviewActivity extends Activity {
     });
     LinearLayout bar = new LinearLayout(this);
     bar.setGravity(Gravity.CENTER_VERTICAL);
-    bar.addView(button("返回", () -> finish()));
+    bar.addView(Ui.iconButton(this, "back", "返回", this::finish, 0xffe8e6df));
     TextView title = text("预览", 17);
+    title.setSingleLine(true);
+    title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    title.setPadding(dp(8), 0, dp(8), 0);
     bar.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-    bar.addView(button("更多", this::menu));
+    bar.addView(Ui.iconButton(this, "more", "更多", this::menu, 0xffe8e6df));
     root.addView(bar);
     content = new FrameLayout(this);
     root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -81,8 +85,7 @@ public final class InboxPreviewActivity extends Activity {
       title.setText(
         task.document.getJSONObject("file").optString("name", "预览")
       );
-      title.setMaxLines(2);
-      title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+      title.setTooltipText(title.getText());
       refresh();
       if (
         !task.state.equals("done") && !InboxFeature.requestNotifications(this)
@@ -404,6 +407,12 @@ public final class InboxPreviewActivity extends Activity {
     b.setTextColor(0xffe8e6df);
     b.setTextSize(14);
     b.setAllCaps(false);
+    b.setMinWidth(dp(48));
+    b.setMinimumWidth(dp(48));
+    b.setMinHeight(dp(48));
+    b.setMinimumHeight(dp(48));
+    b.setContentDescription(value);
+    b.setTooltipText(value);
     b.setBackgroundColor(Color.TRANSPARENT);
     b.setOnClickListener(v -> action.run());
     return b;

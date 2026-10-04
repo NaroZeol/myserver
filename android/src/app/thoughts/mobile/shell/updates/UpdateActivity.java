@@ -101,11 +101,14 @@ public final class UpdateActivity extends Activity implements Feature.Host {
     });
     LinearLayout header = new LinearLayout(this);
     header.setGravity(Gravity.CENTER_VERTICAL);
-    header.addView(ui.button("返回", this::finish, false));
-    header.addView(
-      ui.text("应用更新", 22, Ui.INK),
-      new LinearLayout.LayoutParams(0, ui.dp(52), 1)
-    );
+    header.addView(ui.iconButton("back", "返回", this::finish));
+    TextView title = ui.text("应用更新", 22, Ui.INK);
+    title.setSingleLine(true);
+    title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    title.setGravity(Gravity.CENTER_VERTICAL);
+    title.setPadding(ui.dp(8), 0, ui.dp(8), 0);
+    title.setMinimumHeight(ui.dp(52));
+    header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
     Button check = ui.button(
       UpdateManager.checking() ? "检查中" : "检查",
       () -> UpdateManager.check(this, this::render),

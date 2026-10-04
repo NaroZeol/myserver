@@ -105,9 +105,13 @@ public final class InboxShareActivity extends Activity implements Feature.Host {
     });
     LinearLayout header = new LinearLayout(this);
     header.setGravity(Gravity.CENTER_VERTICAL);
-    header.addView(ui.button("返回", this::onBackPressed, false));
+    header.addView(ui.iconButton("back", "返回", this::onBackPressed));
     TextView title = ui.text("发送到收件箱", 20, Ui.INK);
     title.setTypeface(Typeface.create("sans-serif-medium", 0));
+    title.setSingleLine(true);
+    title.setEllipsize(TextUtils.TruncateAt.END);
+    title.setTooltipText(title.getText());
+    title.setPadding(ui.dp(8), 0, ui.dp(8), 0);
     header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
     header.addView(ui.button("丢弃", this::discard, false));
     root.addView(header);
@@ -278,8 +282,9 @@ public final class InboxShareActivity extends Activity implements Feature.Host {
       row.setPadding(0, ui.dp(8), 0, ui.dp(8));
       LinearLayout names = ui.column();
       TextView name = ui.text(file.optString("name"), 15, Ui.INK);
-      name.setMaxLines(2);
+      name.setSingleLine(true);
       name.setEllipsize(TextUtils.TruncateAt.END);
+      name.setTooltipText(name.getText());
       names.addView(name);
       ui.space(names, 6);
       names.addView(ui.text(Ui.size(file.optLong("size")), 12, Ui.MUTED));

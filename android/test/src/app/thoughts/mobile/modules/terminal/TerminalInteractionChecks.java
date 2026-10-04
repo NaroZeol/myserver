@@ -1,12 +1,13 @@
 package app.thoughts.mobile.modules.terminal;
 
 import android.app.Instrumentation;
-import android.content.ClipboardManager;
 import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.os.SystemClock;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.accessibility.AccessibilityNodeInfo;
 import app.thoughts.mobile.InteractionChecks;
 import org.json.JSONArray;
 
@@ -40,6 +41,39 @@ final class TerminalInteractionChecks {
     int originalRows
   ) throws Exception {
     View root = screen.getWindow().getDecorView();
+    test.runOnMainSync(() -> {
+      int target = Math.round(
+        48 * screen.getResources().getDisplayMetrics().density
+      );
+      for (String label : new String[] { "返回", "更多" }) {
+        View action = InteractionChecks.find(root, label);
+        TerminalChecks.check(
+          action instanceof android.widget.ImageButton &&
+            label.contentEquals(action.getContentDescription()) &&
+            label.contentEquals(action.getTooltipText()) &&
+            action.getWidth() >= target &&
+            action.getHeight() >= target,
+          "Terminal navigation icons need accessible names and 48dp touch targets"
+        );
+      }
+      String modeName = screen
+        .getSharedPreferences("terminal_ui", 0)
+        .getBoolean("internal_keyboard", false)
+        ? "内置键盘"
+        : "系统输入法";
+      View mode = InteractionChecks.find(
+        root,
+        "切换输入方式，当前：" + modeName
+      );
+      TerminalChecks.check(
+        mode != null &&
+          mode.getHeight() >= target &&
+          ("切换输入方式，当前：" + modeName).contentEquals(
+            mode.getTooltipText()
+          ),
+        "The input-mode selector must name its current mode and have a 48dp touch target"
+      );
+    });
     test.runOnMainSync(() ->
       InteractionChecks.find(root, "收起").performClick()
     );
@@ -141,9 +175,15 @@ final class TerminalInteractionChecks {
       ),
       "Long press on Android must select terminal word"
     );
-    test.runOnMainSync(() ->
-      InteractionChecks.find(root, "复制").performClick()
-    );
+    test.runOnMainSync(() -> {
+      View copy = InteractionChecks.find(root, "复制");
+      TerminalChecks.check(
+        copy instanceof android.widget.ImageButton &&
+          "复制".contentEquals(copy.getTooltipText()),
+        "Selection copy icon must preserve its accessible action label"
+      );
+      copy.performClick();
+    });
     test.waitForIdleSync();
     java.util.concurrent.atomic.AtomicReference<String> copied =
       new java.util.concurrent.atomic.AtomicReference<>("");
@@ -172,5 +212,73 @@ final class TerminalInteractionChecks {
       !screen.isFinishing(),
       "Back from selection must stay in terminal"
     );
+    chooseMode(test, screen, "内置模拟键盘", "内置键盘");
+    chooseMode(test, screen, "系统输入法", "系统输入法");
+    // Let the chooser's delayed IME opening finish before restoring the test's idle layout.
+    Thread.sleep(300);
+    test.runOnMainSync(() -> screen.useKeyboard(false, false));
+  }
+
+  private static void chooseMode(
+    Instrumentation test,
+    TerminalActivity screen,
+    String choice,
+    String expected
+  ) throws Exception {
+    test.runOnMainSync(() -> {
+      String current = screen
+        .getSharedPreferences("terminal_ui", 0)
+        .getBoolean("internal_keyboard", false)
+        ? "内置键盘"
+        : "系统输入法";
+      View selector = InteractionChecks.find(
+        screen.getWindow().getDecorView(),
+        "切换输入方式，当前：" + current
+      );
+      TerminalChecks.check(
+        selector != null && selector.performClick(),
+        "Input mode must be selectable from its accessible action"
+      );
+    });
+    test.waitForIdleSync();
+    boolean[] clicked = { false };
+    TerminalChecks.await(() -> {
+      if (clicked[0]) return true;
+      AccessibilityNodeInfo root = test
+        .getUiAutomation()
+        .getRootInActiveWindow();
+      if (root == null) return false;
+      for (AccessibilityNodeInfo node : root.findAccessibilityNodeInfosByText(
+        choice
+      )) {
+        if (
+          node.getText() == null || !choice.contentEquals(node.getText())
+        ) continue;
+        while (node != null && !node.isClickable()) node = node.getParent();
+        if (
+          node != null && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        ) {
+          clicked[0] = true;
+          return true;
+        }
+      }
+      return false;
+    }, "Input-mode dialog must expose its real choices");
+    test.waitForIdleSync();
+    test.runOnMainSync(() -> {
+      String label = "切换输入方式，当前：" + expected;
+      View selector = InteractionChecks.find(
+        screen.getWindow().getDecorView(),
+        label
+      );
+      TerminalChecks.check(
+        selector != null &&
+          label.contentEquals(selector.getTooltipText()) &&
+          label.contentEquals(
+            selector.createAccessibilityNodeInfo().getContentDescription()
+          ),
+        "After changing input mode, accessibility and tooltip must describe the new current mode"
+      );
+    });
   }
 }

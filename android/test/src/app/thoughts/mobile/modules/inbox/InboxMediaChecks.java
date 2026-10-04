@@ -138,6 +138,28 @@ public final class InboxMediaChecks {
           return ready[0];
         }, "Private image did not render");
         test.runOnMainSync(() -> {
+          View root = screen.getWindow().getDecorView();
+          int target = Math.round(
+            48 * context.getResources().getDisplayMetrics().density
+          );
+          for (String label : new String[] { "返回", "更多" }) {
+            View action = find(root, label);
+            TerminalChecks.check(
+              action instanceof android.widget.ImageButton &&
+                label.contentEquals(action.getContentDescription()) &&
+                label.contentEquals(action.getTooltipText()) &&
+                action.getWidth() >= target &&
+                action.getHeight() >= target,
+              "Preview navigation must expose labelled 48dp icon actions"
+            );
+          }
+          TextView title = (TextView) find(root, name);
+          TerminalChecks.check(
+            title != null &&
+              title.getMaxLines() == 1 &&
+              name.contentEquals(title.getTooltipText()),
+            "Long filenames must keep a single-line title and complete tooltip"
+          );
           InboxPreviewActivity.Photo view = photo(
             screen.getWindow().getDecorView()
           );
@@ -422,8 +444,9 @@ public final class InboxMediaChecks {
 
   private static View find(View view, String label) {
     if (
-      view instanceof TextView &&
-      label.contentEquals(((TextView) view).getText())
+      label.equals(view.getContentDescription()) ||
+      (view instanceof TextView &&
+        label.contentEquals(((TextView) view).getText()))
     ) return view;
     if (view instanceof ViewGroup) {
       ViewGroup group = (ViewGroup) view;

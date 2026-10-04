@@ -306,27 +306,30 @@ public final class MainActivity extends Activity implements ThoughtsHost {
     LinearLayout header = new LinearLayout(this);
     header.setGravity(Gravity.CENTER_VERTICAL);
     if (active.hasBack()) header.addView(
-      ui.button("返回", () -> active.back(), false)
+      ui.iconButton("back", "返回", () -> active.back())
     );
     TextView brand = ui.text(active.title(), 22, Ui.INK);
     brand.setGravity(Gravity.CENTER_VERTICAL);
+    brand.setSingleLine(true);
+    brand.setEllipsize(android.text.TextUtils.TruncateAt.END);
     brand.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-    header.addView(brand, new LinearLayout.LayoutParams(0, ui.dp(48), 1));
+    brand.setMinimumHeight(ui.dp(48));
+    header.addView(brand, new LinearLayout.LayoutParams(0, -2, 1));
     if (!active.headerAction().isEmpty()) {
-      Button action = ui.button(
-        active.headerAction(),
-        () -> active.performHeaderAction(),
-        false
+      if (!active.headerIcon().isEmpty()) header.addView(
+        ui.iconButton(active.headerIcon(), active.headerAction(), () ->
+          active.performHeaderAction()
+        )
       );
-      action.setTextColor(Ui.BLUE);
-      if (!active.headerIcon().isEmpty()) {
-        action.setContentDescription(active.headerAction());
-        action.setText("");
-        Drawable symbol = ui.icon(active.headerIcon(), Ui.MUTED);
-        symbol.setBounds(0, 0, ui.dp(21), ui.dp(21));
-        action.setCompoundDrawables(symbol, null, null, null);
+      else {
+        Button action = ui.button(
+          active.headerAction(),
+          () -> active.performHeaderAction(),
+          false
+        );
+        action.setTextColor(Ui.BLUE);
+        header.addView(action);
       }
-      header.addView(action);
     }
     root.addView(header);
     statusView = ui.text(message, 12, Ui.MUTED);
