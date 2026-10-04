@@ -65,12 +65,24 @@ public final class InboxFeature extends Ui implements Feature {
     filter = "all",
     detailId = "";
   private boolean listening, loading, enableNeeded, updatePending;
+  private boolean listsInvalidated;
   private final Runnable update = () -> {
     updatePending = false;
-    if (content != null) updateLists();
+    if (content != null) {
+      updateLists();
+      if (listsInvalidated) {
+        listsInvalidated = false;
+        loadPage(false);
+      }
+    }
   };
   private final BroadcastReceiver receiver = new BroadcastReceiver() {
     public void onReceive(Context context, Intent intent) {
+      if (InboxStore.invalidates(intent, host.serverProfile())) {
+        listsInvalidated = true;
+        requestGeneration++;
+        loading = loadingMore = false;
+      }
       if (!updatePending) {
         updatePending = true;
         handler.postDelayed(update, 250);
@@ -237,7 +249,7 @@ public final class InboxFeature extends Ui implements Feature {
 
   public void enter() {
     listen();
-    refresh();
+    loadPage(false);
   }
 
   public void resume() {
@@ -246,7 +258,7 @@ public final class InboxFeature extends Ui implements Feature {
     );
     listen();
     if (content != null) updateLists();
-    refresh();
+    loadPage(false);
   }
 
   public void pause() {
@@ -280,8 +292,8 @@ public final class InboxFeature extends Ui implements Feature {
     handler.removeCallbacks(update);
     if (invalidate) {
       handler.removeCallbacks(searchRemote);
-      requestGeneration++;
-      loading = loadingMore = searchPending = false;
+      // Keep an already-paid request alive; its response can fill the private cache off-page.
+      searchPending = false;
     }
     updatePending = false;
     if (listening) {
@@ -305,7 +317,7 @@ public final class InboxFeature extends Ui implements Feature {
   public void refresh() {
     handler.removeCallbacks(searchRemote);
     searchPending = false;
-    loadPage(false);
+    loadPage(false, true);
   }
 
   private String filterKey() {
@@ -514,8 +526,11 @@ public final class InboxFeature extends Ui implements Feature {
         runOnUiThread(() -> {
           selected.clear();
           updateSelection();
-          if (deleting) refresh();
-          else if (total > 0) {
+          if (deleting) {
+            try {
+              store.invalidateLists(profile);
+            } catch (Exception ignored) {}
+          } else if (total > 0) {
             if (!requestNotifications(activity)) TransferService.start(
               activity
             );
@@ -563,6 +578,10 @@ public final class InboxFeature extends Ui implements Feature {
   }
 
   private void loadPage(boolean more) {
+    loadPage(more, false);
+  }
+
+  private void loadPage(boolean more, boolean force) {
     final ServerProfile profile = host.serverProfile();
     if (loading || profile == null || content == null) {
       searchPending = false;
@@ -570,6 +589,21 @@ public final class InboxFeature extends Ui implements Feature {
     }
     final String requestedQuery = query.trim(),
       requestedFilter = filterKey();
+    final String cacheKey = requestedQuery + "\n" + requestedFilter;
+    if (!more && !force) try {
+      JSONObject cached = store.freshQuery(profile, cacheKey);
+      if (cached != null) {
+        searchResult = cached;
+        loadedQuery = requestedQuery;
+        loadedFilter = requestedFilter;
+        resultProfile = profile;
+        searchPending = remoteFailed = false;
+        if (summary != null) summary.setText(profile.name);
+        updateLists();
+        return;
+      }
+    } catch (Exception ignored) {}
+    final long revision = InboxStore.revision();
     final String requestedType = filter,
       options = "&source=" + source + "&sort=" + sort + "&since=" + since;
     final JSONObject previous = visibleResponse();
@@ -617,6 +651,11 @@ public final class InboxFeature extends Ui implements Feature {
               for (JSONObject item : combined.values()) values.put(item);
               response.put("items", values);
             }
+            if (!store.cacheQuery(profile, cacheKey, response, revision)) {
+              loading = loadingMore = false;
+              loadPage(false);
+              return;
+            }
             searchResult = response;
             loadedQuery = requestedQuery;
             loadedFilter = requestedFilter;
@@ -649,7 +688,6 @@ public final class InboxFeature extends Ui implements Feature {
   ) {
     return (
       generation == requestGeneration &&
-      content != null &&
       query.trim().equals(requestedQuery) &&
       filterKey().equals(requestedFilter) &&
       InboxStore.sameIdentity(profile, host.serverProfile())
@@ -674,7 +712,9 @@ public final class InboxFeature extends Ui implements Feature {
       enableNeeded ? "收件箱尚未授权" : "连接失败 · 显示本机缓存"
     );
     updateLists();
-    if (!enableNeeded) status(errorMessage(error));
+    if (!enableNeeded && listening && content != null) status(
+      errorMessage(error)
+    );
   }
 
   private void enable() {
@@ -682,6 +722,7 @@ public final class InboxFeature extends Ui implements Feature {
   }
 
   private void updateLists() {
+    if (content == null) return;
     if (!detailId.isEmpty()) {
       content.removeAllViews();
       renderDetail(content);
@@ -1310,7 +1351,7 @@ public final class InboxFeature extends Ui implements Feature {
           method,
           name == null ? null : new JSONObject().put("title", name)
         );
-        store.cache(profile, transfer.request("/inbox", "GET", null));
+        store.invalidateLists(profile);
         runOnUiThread(() -> {
           if (method.equals("DELETE")) {
             detailId = "";
@@ -1318,7 +1359,6 @@ public final class InboxFeature extends Ui implements Feature {
           }
           searchResult = null;
           host.redraw();
-          refresh();
           status(method.equals("DELETE") ? "已删除" : "已重命名");
         });
       } catch (Exception e) {

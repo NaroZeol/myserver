@@ -17,7 +17,7 @@ public final class ServerChecks {
     class Clock implements RefreshLoop.Scheduler {
 
       Runnable pending;
-      long delay;
+      long delay, now;
 
       public void post(Runnable task, long milliseconds) {
         check(pending == null, "Only one monitor tick may be queued");
@@ -33,16 +33,21 @@ public final class ServerChecks {
         Runnable task = pending;
         pending = null;
         check(task != null, "Expected a pending refresh");
+        now += delay;
         task.run();
       }
     }
     Clock clock = new Clock();
     int[] calls = { 0 };
     RefreshLoop[] loop = { null };
-    loop[0] = new RefreshLoop(clock, () -> {
-      check(loop[0].begin(), "Refresh must begin once");
-      calls[0]++;
-    });
+    loop[0] = new RefreshLoop(
+      clock,
+      () -> {
+        check(loop[0].begin(), "Refresh must begin once");
+        calls[0]++;
+      },
+      () -> clock.now
+    );
     loop[0].resume(5000);
     clock.fire();
     check(!loop[0].begin(), "Slow requests must not overlap");
@@ -60,11 +65,55 @@ public final class ServerChecks {
       clock.pending == null,
       "Leaving the screen must not reschedule an in-flight request"
     );
-    loop[0].resume(0);
+    loop[0].resume(2000);
+    check(
+      clock.delay == 2000,
+      "Returning immediately must reuse the last sample"
+    );
+    loop[0].pause();
+    clock.now += 750;
+    loop[0].resume(2000);
+    check(
+      clock.delay == 1250,
+      "Navigation must keep the remaining sampling interval"
+    );
+    loop[0].pause();
+    clock.now += 3000;
+    loop[0].resume(2000);
+    check(
+      clock.delay == 0,
+      "Expired monitoring samples must refresh immediately"
+    );
     clock.fire();
+    loop[0].finished();
+    loop[0].pause();
+    loop[0].resume(0);
+    check(
+      clock.pending == null,
+      "Manual mode must reuse the last snapshot across navigation"
+    );
+    check(loop[0].begin(), "Explicit refresh must bypass snapshot freshness");
     loop[0].finished();
     check(clock.pending == null, "Manual mode must not poll in the background");
     check(calls[0] == 3, "Lifecycle must not duplicate samples");
+    Clock restored = new Clock();
+    RefreshLoop cached = new RefreshLoop(
+      restored,
+      () -> {},
+      () -> restored.now
+    );
+    cached.cached(1000);
+    cached.resume(5000);
+    check(
+      restored.delay == 4000,
+      "Restored snapshots must retain their remaining freshness"
+    );
+    cached.pause();
+    cached.resume(0);
+    check(
+      restored.pending == null,
+      "Manual mode must reuse persisted snapshots"
+    );
     final JSONObject metrics = new JSONObject(
       "{\"cpu\":{\"cores\":2,\"usage_percent\":37.5,\"load_average\":[0.5,0.3,0.2]},\"memory\":null,\"disk\":null,\"uptime_seconds\":20}"
     );
@@ -138,9 +187,10 @@ public final class ServerChecks {
       );
       preferences.edit().putInt("seconds", 0).commit();
       test.runOnMainSync(() -> screen.navigate("server"));
-      app.thoughts.mobile.modules.terminal.TerminalChecks.await(
-        () -> snapshots.getLong("checked_at", 0) > stopped,
-        "Manual mode must load the initial status"
+      test.waitForIdleSync();
+      check(
+        snapshots.getLong("checked_at", 0) == stopped,
+        "Manual mode must reuse its existing snapshot when returning"
       );
       long manual = snapshots.getLong("checked_at", 0);
       Thread.sleep(2500);

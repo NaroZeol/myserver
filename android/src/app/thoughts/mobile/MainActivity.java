@@ -23,6 +23,7 @@ import app.thoughts.mobile.modules.inbox.InboxShareActivity;
 import app.thoughts.mobile.modules.server.ServerFeature;
 import app.thoughts.mobile.modules.thoughts.Store;
 import app.thoughts.mobile.modules.thoughts.Sync;
+import app.thoughts.mobile.modules.thoughts.SyncPolicy;
 import app.thoughts.mobile.modules.thoughts.ThoughtsHost;
 import app.thoughts.mobile.modules.thoughts.ThoughtsModule;
 import app.thoughts.mobile.shell.SettingsFeature;
@@ -38,8 +39,11 @@ public final class MainActivity extends Activity implements ThoughtsHost {
 
   private static final ExecutorService IO = Executors.newSingleThreadExecutor();
   private static final AtomicBoolean SYNCING = new AtomicBoolean(false);
+  private static java.lang.ref.WeakReference<MainActivity> syncHost =
+    new java.lang.ref.WeakReference<>(null);
   private final LinkedHashMap<String, Feature> features = new LinkedHashMap<>();
   private Store store;
+  private SyncPolicy syncPolicy;
   private DeviceAccount account;
   private ServerApi api;
   private ThoughtsModule thoughts;
@@ -60,7 +64,26 @@ public final class MainActivity extends Activity implements ThoughtsHost {
 
   public void onCreate(Bundle state) {
     super.onCreate(state);
+    syncHost = new java.lang.ref.WeakReference<>(this);
     store = new Store(this);
+    android.content.SharedPreferences syncState = getSharedPreferences(
+      SyncPolicy.PREFERENCES,
+      0
+    );
+    syncPolicy = new SyncPolicy(
+      new SyncPolicy.Storage() {
+        public String read(String server) {
+          return syncState.getString(server, "");
+        }
+
+        public void write(String server, String state) {
+          if (
+            !syncState.edit().putString(server, state).commit()
+          ) throw new IllegalStateException("无法保存同步状态");
+        }
+      },
+      System::currentTimeMillis
+    );
     account = new DeviceAccount(this);
     api = new ServerApi(ServerProfile.load(this));
     ui = new Ui(this);
@@ -451,25 +474,77 @@ public final class MainActivity extends Activity implements ThoughtsHost {
   }
 
   public void autoSync() {
-    if (automaticSync()) sync();
+    if (automaticSync()) sync(false);
   }
 
   public void sync() {
+    sync(true);
+  }
+
+  private void sync(boolean manual) {
     if (!account.can("thoughts")) return;
     if (!account.isVerified()) return;
     if (!SYNCING.compareAndSet(false, true)) return;
-    if (current.equals("thoughts")) status("正在同步 · 本机记录已保留");
+    final ServerApi target = api;
     IO.execute(() -> {
-      String result;
+      String result = null;
+      SyncPolicy.Attempt attempt = null;
+      Store.Pending before = null;
+      boolean success = false;
       try {
-        result = Sync.run(store, account, api);
+        before = store.pendingState();
+        ServerProfile profile = target.profile;
+        if (profile == null) return;
+        attempt = syncPolicy.begin(
+          SyncPolicy.identity(
+            profile.host,
+            profile.port,
+            profile.user,
+            profile.knownHost
+          ),
+          before.fingerprint,
+          manual
+        );
+        if (attempt == null) return;
+        runOnUiThread(() -> {
+          if (!isDestroyed() && current.equals("thoughts")) status(
+            "正在同步 · 本机记录已保留"
+          );
+        });
+        result = Sync.run(store, account, target);
+        success = true;
       } catch (Exception e) {
         if (
           e instanceof ConnectionFailure && ((ConnectionFailure) e).code == 401
         ) account.clear();
         result = ui.errorMessage(e);
       } finally {
+        if (attempt != null) {
+          try {
+            Store.Pending after = store.pendingState();
+            syncPolicy.finish(
+              attempt,
+              success,
+              before.localChanges == after.localChanges
+                ? after.fingerprint
+                : before.fingerprint
+            );
+          } catch (Exception e) {
+            result = ui.errorMessage(e);
+          }
+        }
         SYNCING.set(false);
+        long changes =
+          before == null ? store.localChanges() : before.localChanges;
+        runOnUiThread(() -> {
+          // Include cache skips: a save can race the fingerprint read itself.
+          MainActivity host = syncHost.get();
+          if (
+            host != null &&
+            !host.isDestroyed() &&
+            host.store.localChanges() != changes
+          ) host.autoSync();
+        });
       }
       app.thoughts.mobile.modules.thoughts.ThoughtsSyncLog.record(this, result);
       String value = result;

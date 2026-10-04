@@ -14,6 +14,50 @@ import org.json.JSONObject;
 
 public final class Store extends SQLiteOpenHelper {
 
+  private final android.content.SharedPreferences syncState;
+
+  private static final java.util.concurrent.atomic.AtomicLong LOCAL_CHANGES =
+    new java.util.concurrent.atomic.AtomicLong();
+
+  public static final class Pending {
+
+    public final String fingerprint;
+    public final long localChanges;
+
+    private Pending(String fingerprint, long localChanges) {
+      this.fingerprint = fingerprint;
+      this.localChanges = localChanges;
+    }
+  }
+
+  public long localChanges() {
+    return LOCAL_CHANGES.get();
+  }
+
+  public synchronized Pending pendingState() {
+    long changes = LOCAL_CHANGES.get();
+    StringBuilder content = new StringBuilder();
+    try (
+      Cursor cursor = getReadableDatabase().rawQuery(
+        "SELECT id,pending,revision FROM notes WHERE pending IS NOT NULL AND pending!='local-trash' AND error IS NULL ORDER BY id",
+        null
+      )
+    ) {
+      while (cursor.moveToNext())
+        content
+          .append(cursor.getString(0))
+          .append(':')
+          .append(cursor.getString(1))
+          .append(':')
+          .append(cursor.getInt(2))
+          .append('\n');
+    }
+    return new Pending(
+      content.length() == 0 ? "" : SyncPolicy.digest(content.toString()),
+      changes
+    );
+  }
+
   public static final class Entry {
 
     public JSONObject note;
@@ -30,6 +74,9 @@ public final class Store extends SQLiteOpenHelper {
 
   public Store(Context context) {
     super(context.getApplicationContext(), "thoughts.db", null, 1);
+    syncState = context
+      .getApplicationContext()
+      .getSharedPreferences(SyncPolicy.PREFERENCES, Context.MODE_PRIVATE);
     setWriteAheadLoggingEnabled(true);
   }
 
@@ -37,6 +84,7 @@ public final class Store extends SQLiteOpenHelper {
     db.execSQL(
       "CREATE TABLE notes(id TEXT PRIMARY KEY, document TEXT NOT NULL, pending TEXT, error TEXT, revision INTEGER NOT NULL DEFAULT 1)"
     );
+    invalidateSyncState();
   }
 
   public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
@@ -126,6 +174,7 @@ public final class Store extends SQLiteOpenHelper {
       null,
       old == null ? 1 : old.revision + 1
     );
+    LOCAL_CHANGES.incrementAndGet();
   }
 
   public synchronized void removeOrRestore(Entry selected, boolean restore)
@@ -145,6 +194,7 @@ public final class Store extends SQLiteOpenHelper {
         null,
         old.revision + 1
       );
+      LOCAL_CHANGES.incrementAndGet();
       return;
     }
     if (old.pending != null) throw new Exception(
@@ -155,6 +205,7 @@ public final class Store extends SQLiteOpenHelper {
       restore ? JSONObject.NULL : Instant.now().toString()
     );
     write(old.note, restore ? "restore" : "delete", null, old.revision + 1);
+    LOCAL_CHANGES.incrementAndGet();
   }
 
   public synchronized void acknowledge(Entry sent, JSONObject response)
@@ -235,5 +286,13 @@ public final class Store extends SQLiteOpenHelper {
 
   public synchronized void clear() {
     getWritableDatabase().delete("notes", null, null);
+    LOCAL_CHANGES.incrementAndGet();
+    invalidateSyncState();
+  }
+
+  private void invalidateSyncState() {
+    if (!syncState.edit().clear().commit()) throw new IllegalStateException(
+      "无法清除同步状态"
+    );
   }
 }

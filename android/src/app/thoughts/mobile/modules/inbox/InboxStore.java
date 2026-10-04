@@ -23,6 +23,104 @@ public final class InboxStore extends SQLiteOpenHelper {
   private final Context context;
   private final File blobs;
 
+  private static final LinkedHashMap<String, QueryCache> QUERIES =
+    new LinkedHashMap<>(16, .75f, true);
+  private static long cacheRevision;
+
+  private static final class QueryCache {
+
+    final String document;
+    final long stored = android.os.SystemClock.elapsedRealtime();
+
+    QueryCache(String document) {
+      this.document = document;
+    }
+  }
+
+  static long revision() {
+    synchronized (LOCK) {
+      return cacheRevision;
+    }
+  }
+
+  JSONObject freshQuery(ServerProfile profile, String query) throws Exception {
+    if (profile == null) return null;
+    synchronized (LOCK) {
+      String key = identity(profile) + "\n" + query;
+      QueryCache entry = QUERIES.get(key);
+      if (entry == null) return null;
+      if (android.os.SystemClock.elapsedRealtime() - entry.stored >= 60000) {
+        QUERIES.remove(key);
+        return null;
+      }
+      return new JSONObject(entry.document);
+    }
+  }
+
+  void cacheQuery(ServerProfile profile, String query, JSONObject response)
+    throws Exception {
+    cacheQuery(profile, query, response, -1);
+  }
+
+  boolean cacheQuery(
+    ServerProfile profile,
+    String query,
+    JSONObject response,
+    long expectedRevision
+  ) throws Exception {
+    synchronized (LOCK) {
+      if (
+        expectedRevision >= 0 && expectedRevision != cacheRevision
+      ) return false;
+      String document = response.toString();
+      String key = identity(profile) + "\n" + query;
+      if (document.length() > 512 * 1024) {
+        QUERIES.remove(key);
+        return true;
+      }
+      QUERIES.put(key, new QueryCache(document));
+      long bytes = 0;
+      for (QueryCache entry : QUERIES.values())
+        bytes += entry.document.length() * 2L;
+      Iterator<QueryCache> iterator = QUERIES.values().iterator();
+      while (
+        iterator.hasNext() && (QUERIES.size() > 16 || bytes > 4 * 1024 * 1024)
+      ) {
+        bytes -= iterator.next().document.length() * 2L;
+        iterator.remove();
+      }
+      return true;
+    }
+  }
+
+  void invalidateLists(ServerProfile profile) throws Exception {
+    if (profile == null) return;
+    String owner = identity(profile);
+    synchronized (LOCK) {
+      cacheRevision++;
+      QUERIES.keySet().removeIf(key -> key.startsWith(owner + "\n"));
+    }
+    context.sendBroadcast(
+      new android.content.Intent(ACTION_CHANGED)
+        .setPackage(context.getPackageName())
+        .putExtra("lists_invalidated", owner)
+    );
+  }
+
+  static boolean invalidates(
+    android.content.Intent intent,
+    ServerProfile profile
+  ) {
+    try {
+      return (
+        profile != null &&
+        identity(profile).equals(intent.getStringExtra("lists_invalidated"))
+      );
+    } catch (Exception ignored) {
+      return false;
+    }
+  }
+
   public interface ImportProgress {
     void progress(long bytes);
   }
@@ -143,7 +241,7 @@ public final class InboxStore extends SQLiteOpenHelper {
     );
   }
 
-  private static String identity(ServerProfile p) throws Exception {
+  static String identity(ServerProfile p) throws Exception {
     return hex(
       MessageDigest.getInstance("SHA-256").digest(
         (
@@ -541,6 +639,24 @@ public final class InboxStore extends SQLiteOpenHelper {
         new JSONObject().put("item", item).put("file", file),
         file.getLong("size")
       );
+      Task created = task(id);
+      try {
+        if (
+          InboxThumbnails.copyVerified(
+            context,
+            p,
+            item,
+            file,
+            downloadPart(created)
+          )
+        ) {
+          finishDownload(created);
+          progress(id, file.getLong("size"));
+          setState(id, "done", "");
+        }
+      } catch (IOException ignored) {
+        downloadPart(created).delete();
+      }
       changed(id);
       return task(id);
     }

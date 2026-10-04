@@ -1,6 +1,8 @@
 package app.thoughts.mobile.modules.server;
 
-/** Schedule after completion, never overlap requests or poll an invisible screen. */
+import java.util.function.LongSupplier;
+
+/** Schedule from the last completion, never overlap or reset the interval on navigation. */
 final class RefreshLoop {
 
   interface Scheduler {
@@ -11,22 +13,41 @@ final class RefreshLoop {
   private final Scheduler scheduler;
   private final Runnable request;
   private final Runnable tick;
-  private boolean visible, running;
-  private long interval;
+  private final LongSupplier clock;
+  private boolean visible, running, sampled;
+  private long interval, completedAt;
 
   RefreshLoop(Scheduler scheduler, Runnable request) {
+    this(scheduler, request, android.os.SystemClock::elapsedRealtime);
+  }
+
+  RefreshLoop(Scheduler scheduler, Runnable request, LongSupplier clock) {
     this.scheduler = scheduler;
     this.request = request;
+    this.clock = clock;
     tick = () -> {
       if (visible && !running) this.request.run();
     };
   }
 
+  void cached(long age) {
+    if (age < 0) return;
+    sampled = true;
+    completedAt = clock.getAsLong() - age;
+  }
+
+  private void schedule() {
+    scheduler.remove(tick);
+    if (!visible || running || (sampled && interval == 0)) return;
+    long elapsed = clock.getAsLong() - completedAt;
+    long delay = sampled && elapsed >= 0 ? Math.max(0, interval - elapsed) : 0;
+    scheduler.post(tick, delay);
+  }
+
   void resume(long milliseconds) {
     visible = true;
     interval = milliseconds;
-    scheduler.remove(tick);
-    if (!running) scheduler.post(tick, 0);
+    schedule();
   }
 
   void pause() {
@@ -36,8 +57,7 @@ final class RefreshLoop {
 
   void interval(long milliseconds) {
     interval = milliseconds;
-    scheduler.remove(tick);
-    if (visible && !running && interval > 0) scheduler.post(tick, interval);
+    schedule();
   }
 
   boolean begin() {
@@ -49,6 +69,8 @@ final class RefreshLoop {
 
   void finished() {
     running = false;
-    if (visible && interval > 0) scheduler.post(tick, interval);
+    sampled = true;
+    completedAt = clock.getAsLong();
+    schedule();
   }
 }

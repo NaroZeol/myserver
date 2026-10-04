@@ -48,6 +48,9 @@ public final class ServerFeature extends Ui implements Feature {
       String value = saved.getString("snapshot", "");
       if (!value.isEmpty()) snapshot = new JSONObject(value);
       checkedAt = saved.getLong("checked_at", 0);
+      if (snapshot != null && checkedAt > 0) polling.cached(
+        System.currentTimeMillis() - checkedAt
+      );
     } catch (Exception ignored) {}
   }
 

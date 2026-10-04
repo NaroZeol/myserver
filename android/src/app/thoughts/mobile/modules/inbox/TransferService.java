@@ -210,6 +210,7 @@ public final class TransferService extends Service {
   }
 
   private void drain(int startId) {
+    Map<String, ServerProfile> changedProfiles = new LinkedHashMap<>();
     try (InboxStore store = new InboxStore(this)) {
       List<InboxStore.Task> tasks = store.tasks();
       Collections.reverse(tasks);
@@ -236,19 +237,18 @@ public final class TransferService extends Service {
           check(store, task);
           connection = new InboxTransfer(task.profile);
           check(store, task);
-          if ("upload".equals(task.kind)) upload(store, task);
-          else download(store, task);
+          if ("upload".equals(task.kind)) {
+            upload(store, task);
+            changedProfiles.put(
+              InboxStore.identity(task.profile),
+              task.profile
+            );
+          } else download(store, task);
           check(store, task);
           if (store.transition(task.id, "running", "done", "")) {
             store.progress(task.id, task.total);
             if ("upload".equals(task.kind)) store.discardBytes(task);
           }
-          try {
-            store.cache(
-              task.profile,
-              connection.request("/inbox", "GET", null)
-            );
-          } catch (Exception ignored) {}
         } catch (Exception e) {
           store.transition(task.id, "running", "failed", message(e));
         } finally {
@@ -260,6 +260,12 @@ public final class TransferService extends Service {
       }
     } catch (Exception ignored) {
     } finally {
+      if (!changedProfiles.isEmpty()) try (
+        InboxStore store = new InboxStore(this)
+      ) {
+        for (ServerProfile profile : changedProfiles.values())
+          store.invalidateLists(profile);
+      } catch (Exception ignored) {}
       main.post(() -> finish(startId));
     }
   }

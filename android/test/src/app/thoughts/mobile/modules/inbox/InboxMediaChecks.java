@@ -261,6 +261,8 @@ public final class InboxMediaChecks {
     Context context = test.getTargetContext();
     String id = UUID.randomUUID().toString();
     InboxThumbnails[] loader = { null };
+    InboxStore.Task[] promoted = { null };
+    boolean[] remoteDeleted = { false };
     java.security.MessageDigest hash = java.security.MessageDigest.getInstance(
       "SHA-256"
     );
@@ -325,6 +327,16 @@ public final class InboxMediaChecks {
         store.tasks().size() == tasks,
         "Automatic thumbnails must not pollute the download queue"
       );
+      promoted[0] = store.enqueueDownload(profile, item, remote);
+      TerminalChecks.check(
+        promoted[0].state.equals("done") &&
+          store.localFile(promoted[0]).length() == source.length(),
+        "Opening or downloading a verified thumbnail must reuse its original bytes without queueing network transfer"
+      );
+      TerminalChecks.check(
+        store.enqueueDownload(profile, item, remote).id.equals(promoted[0].id),
+        "Repeated preview/download must retain the same verified local task"
+      );
       test.runOnMainSync(() -> {
         loader[0].cancel();
         loader[0] = new InboxThumbnails(context);
@@ -340,9 +352,55 @@ public final class InboxMediaChecks {
           "A revisited thumbnail must reuse its private decoded cache"
         );
       });
+      transfer.request("/inbox/items/" + id, "DELETE", null);
+      remoteDeleted[0] = true;
+      java.lang.reflect.Method cacheKey =
+        InboxThumbnails.class.getDeclaredMethod(
+          "key",
+          ServerProfile.class,
+          JSONObject.class,
+          JSONObject.class
+        );
+      cacheKey.setAccessible(true);
+      File previewFile = new File(
+        new File(context.getCacheDir(), "inbox-previews"),
+        (String) cacheKey.invoke(null, profile, item, remote)
+      );
+      TerminalChecks.check(
+        previewFile.delete(),
+        "Thumbnail cache fixture must be removable"
+      );
+      java.lang.reflect.Field bitmapCache =
+        InboxThumbnails.class.getDeclaredField("BITMAPS");
+      bitmapCache.setAccessible(true);
+      ((android.util.LruCache<?, ?>) bitmapCache.get(null)).evictAll();
+      java.util.concurrent.CountDownLatch localReady =
+        new java.util.concurrent.CountDownLatch(1);
+      java.util.concurrent.atomic.AtomicReference<Bitmap> localBitmap =
+        new java.util.concurrent.atomic.AtomicReference<>();
+      test.runOnMainSync(() -> {
+        loader[0].cancel();
+        loader[0] = new InboxThumbnails(context);
+        loader[0].request(profile, item, remote, bitmap -> {
+          localBitmap.set(bitmap);
+          localReady.countDown();
+        });
+      });
+      TerminalChecks.check(
+        localReady.await(10, java.util.concurrent.TimeUnit.SECONDS) &&
+          localBitmap.get() != null,
+        "An already-downloaded image must supply thumbnails without revisiting a deleted remote file"
+      );
     } finally {
       if (loader[0] != null) test.runOnMainSync(() -> loader[0].cancel());
-      try (InboxTransfer transfer = new InboxTransfer(profile)) {
+      if (promoted[0] != null) try (
+        InboxStore store = new InboxStore(context)
+      ) {
+        store.removeTask(promoted[0].id);
+      }
+      if (!remoteDeleted[0]) try (
+        InboxTransfer transfer = new InboxTransfer(profile)
+      ) {
         transfer.request("/inbox/items/" + id, "DELETE", null);
       }
     }

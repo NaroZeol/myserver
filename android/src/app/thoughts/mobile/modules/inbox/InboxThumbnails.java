@@ -54,6 +54,68 @@ final class InboxThumbnails {
     );
   }
 
+  private static String key(
+    ServerProfile profile,
+    JSONObject item,
+    JSONObject file
+  ) throws Exception {
+    return InboxStore.hex(
+      MessageDigest.getInstance("SHA-256").digest(
+        (
+          profile.host +
+          "\n" +
+          profile.user +
+          "\n" +
+          profile.port +
+          "\n" +
+          profile.knownHost +
+          "\n" +
+          item.getString("id") +
+          "\n" +
+          file.getString("id") +
+          "\n" +
+          file.getString("sha256")
+        ).getBytes("UTF-8")
+      )
+    );
+  }
+
+  static boolean copyVerified(
+    Context context,
+    ServerProfile profile,
+    JSONObject item,
+    JSONObject file,
+    File destination
+  ) throws Exception {
+    if (!eligible(file)) return false;
+    File cached = new File(
+      new File(context.getCacheDir(), "inbox-previews"),
+      key(profile, item, file)
+    );
+    if (
+      !cached.isFile() || cached.length() != file.optLong("size")
+    ) return false;
+    MessageDigest hash = MessageDigest.getInstance("SHA-256");
+    try (
+      InputStream input = new FileInputStream(cached);
+      FileOutputStream output = new FileOutputStream(destination)
+    ) {
+      byte[] bytes = new byte[32768];
+      int n;
+      while ((n = input.read(bytes)) != -1) {
+        output.write(bytes, 0, n);
+        hash.update(bytes, 0, n);
+      }
+      output.getFD().sync();
+    }
+    if (!InboxStore.hex(hash.digest()).equals(file.optString("sha256"))) {
+      destination.delete();
+      cached.delete();
+      return false;
+    }
+    return true;
+  }
+
   boolean request(
     ServerProfile profile,
     JSONObject item,
@@ -63,25 +125,7 @@ final class InboxThumbnails {
     if (canceled || profile == null || !eligible(file)) return false;
     final String key;
     try {
-      key = InboxStore.hex(
-        MessageDigest.getInstance("SHA-256").digest(
-          (
-            profile.host +
-            "\n" +
-            profile.user +
-            "\n" +
-            profile.port +
-            "\n" +
-            profile.knownHost +
-            "\n" +
-            item.getString("id") +
-            "\n" +
-            file.getString("id") +
-            "\n" +
-            file.getString("sha256")
-          ).getBytes("UTF-8")
-        )
-      );
+      key = key(profile, item, file);
     } catch (Exception e) {
       return false;
     }
@@ -109,6 +153,27 @@ final class InboxThumbnails {
           "Preview cache unavailable"
         );
         File target = new File(dir, key);
+        File downloaded = null;
+        try (InboxStore store = new InboxStore(context)) {
+          InboxStore.Task task = store.findDownload(
+            profile,
+            item.getString("id"),
+            file.getString("id")
+          );
+          if (
+            task != null &&
+            task.state.equals("done") &&
+            task.document
+              .getJSONObject("file")
+              .optString("sha256")
+              .equals(file.optString("sha256"))
+          ) downloaded = store.localFile(task);
+        }
+        if (downloaded != null) {
+          decoded = InboxMedia.bitmap(downloaded, 320);
+          BITMAPS.put(key, decoded);
+          return;
+        }
         if (!target.isFile()) {
           partial = new File(dir, key + ".part");
           try (InboxTransfer transfer = new InboxTransfer(profile)) {

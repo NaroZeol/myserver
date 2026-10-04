@@ -26,6 +26,7 @@ final class InboxPagingChecks {
     JSONObject cache;
     try (InboxStore store = new InboxStore(context)) {
       cache = store.cachedResponse(original);
+      store.invalidateLists(original);
     }
     ServerProfile[] current = { original };
     String[] destination = { null };
@@ -35,7 +36,10 @@ final class InboxPagingChecks {
     CountDownLatch identityStarted = new CountDownLatch(1),
       releaseIdentity = new CountDownLatch(1),
       identityReturned = new CountDownLatch(1);
-    AtomicInteger oldCalls = new AtomicInteger();
+    CountDownLatch flightStarted = new CountDownLatch(1),
+      releaseFlight = new CountDownLatch(1);
+    AtomicInteger oldCalls = new AtomicInteger(),
+      requests = new AtomicInteger();
     Feature.Host host = new Feature.Host() {
       public Activity activity() {
         return main;
@@ -80,10 +84,18 @@ final class InboxPagingChecks {
     final InboxFeature[] feature = { null };
     final LinearLayout[] surface = { null };
     InboxFeature.PageLoader loader = (profile, path) -> {
+      requests.incrementAndGet();
       Uri uri = Uri.parse("https://fixture.invalid" + path);
       String q = uri.getQueryParameter("q"),
         type = uri.getQueryParameter("type");
       int offset = Integer.parseInt(uri.getQueryParameter("offset"));
+      if ("flight".equals(q)) {
+        flightStarted.countDown();
+        if (
+          !releaseFlight.await(10, TimeUnit.SECONDS)
+        ) throw new AssertionError("Background request not released");
+        return page("flight result", false, 100, false);
+      }
       if ("old".equals(q) && oldCalls.incrementAndGet() == 1) {
         oldStarted.countDown();
         if (!releaseOld.await(20, TimeUnit.SECONDS)) throw new AssertionError(
@@ -107,6 +119,7 @@ final class InboxPagingChecks {
         offset + 100,
         false
       );
+      if ("repeat".equals(q)) return page("repeat result", false, 100, false);
       if ("files".equals(type)) return page("remote file", false, 100, true);
       return page("initial", false, 100, false);
     };
@@ -120,6 +133,72 @@ final class InboxPagingChecks {
         feature[0].enter();
       });
       awaitText(test, surface[0], "initial");
+      int first = requests.get();
+      test.runOnMainSync(() -> {
+        feature[0].enter();
+        feature[0].pause();
+        feature[0].resume();
+      });
+      Thread.sleep(400);
+      TerminalChecks.check(
+        requests.get() == first,
+        "Entering or briefly backgrounding a fresh inbox must not request its list again"
+      );
+      search(test, surface[0], "repeat");
+      awaitText(test, surface[0], "repeat result");
+      int searched = requests.get();
+      search(test, surface[0], "");
+      Thread.sleep(400);
+      search(test, surface[0], "repeat");
+      Thread.sleep(400);
+      TerminalChecks.check(
+        requests.get() == searched,
+        "Revisiting a fresh query must reuse its cached result"
+      );
+      test.runOnMainSync(() -> feature[0].refresh());
+      TerminalChecks.await(
+        () -> requests.get() == searched + 1,
+        "Explicit refresh must bypass the query cache"
+      );
+      awaitText(test, surface[0], original.name);
+      try (InboxStore store = new InboxStore(context)) {
+        store.invalidateLists(original);
+      }
+      TerminalChecks.await(
+        () -> requests.get() == searched + 2,
+        "A successful mutation must invalidate and reload the visible list"
+      );
+      Thread.sleep(400);
+      int mutated = requests.get();
+      try (InboxStore store = new InboxStore(context)) {
+        store.changed("progress-fixture");
+      }
+      Thread.sleep(400);
+      TerminalChecks.check(
+        requests.get() == mutated,
+        "Transfer progress must not trigger server list reads"
+      );
+      search(test, surface[0], "flight");
+      TerminalChecks.check(
+        flightStarted.await(5, TimeUnit.SECONDS),
+        "In-flight request must start"
+      );
+      int inflightCount = requests.get();
+      test.runOnMainSync(() -> {
+        feature[0].pause();
+        feature[0].leave();
+        surface[0].removeAllViews();
+        feature[0].render(surface[0]);
+        feature[0].enter();
+        feature[0].resume();
+      });
+      Thread.sleep(150);
+      TerminalChecks.check(
+        requests.get() == inflightCount,
+        "Returning during an in-flight list request must share it instead of requesting again"
+      );
+      releaseFlight.countDown();
+      awaitText(test, surface[0], "flight result");
       search(test, surface[0], "old");
       TerminalChecks.check(
         oldStarted.await(5, TimeUnit.SECONDS),
@@ -190,6 +269,37 @@ final class InboxPagingChecks {
           "Responses from a previous server must not enter the current view"
         )
       );
+      int previousServerRequests = requests.get();
+      search(test, surface[0], "repeat");
+      awaitText(test, surface[0], "repeat result");
+      TerminalChecks.await(
+        () -> requests.get() == previousServerRequests + 1,
+        "Another server must not reuse the previous server's query cache"
+      );
+      try (InboxStore store = new InboxStore(context)) {
+        long beforeMutation = InboxStore.revision();
+        store.invalidateLists(original);
+        TerminalChecks.check(
+          !store.cacheQuery(
+            original,
+            "stale-write",
+            new JSONObject().put("items", new JSONArray()),
+            beforeMutation
+          ) &&
+            store.freshQuery(original, "stale-write") == null,
+          "A response started before mutation must not revalidate a stale cache entry"
+        );
+        for (int i = 0; i < 20; i++) store.cacheQuery(
+          original,
+          "bounded-" + i,
+          new JSONObject().put("items", new JSONArray())
+        );
+        TerminalChecks.check(
+          store.freshQuery(original, "bounded-0") == null &&
+            store.freshQuery(original, "bounded-19") != null,
+          "Query cache must evict older results instead of retaining all searches"
+        );
+      }
       test.runOnMainSync(() -> {
         feature[0].pause();
         current[0] = null;
@@ -204,6 +314,7 @@ final class InboxPagingChecks {
     } finally {
       releaseOld.countDown();
       releaseIdentity.countDown();
+      releaseFlight.countDown();
       test.runOnMainSync(() -> {
         if (feature[0] != null) {
           feature[0].pause();
@@ -213,6 +324,7 @@ final class InboxPagingChecks {
         main.navigate(previousFeature);
       });
       try (InboxStore store = new InboxStore(context)) {
+        store.invalidateLists(original);
         store.cache(original, cache);
       }
     }

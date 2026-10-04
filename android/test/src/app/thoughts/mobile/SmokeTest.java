@@ -218,6 +218,7 @@ public final class SmokeTest extends Instrumentation {
         .commit();
       checkDeviceSignature();
       app.thoughts.mobile.shell.updates.UpdateChecks.run(this);
+      app.thoughts.mobile.modules.thoughts.ThoughtsSyncChecks.run(this);
       Store store = new Store(getTargetContext());
       store.clear();
       new DeviceAccount(getTargetContext()).clear();
