@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.thoughts.mobile" android:versionCode="17" android:versionName="1.11.0">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.thoughts.mobile" android:versionCode="18" android:versionName="1.12.0">
   <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
   <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -9,7 +9,18 @@
   <uses-permission android:name="android.permission.WAKE_LOCK" />
   <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+  <queries>
+    <package android:name="app.thoughts.mobile" />
+    <package android:name="app.thoughts.mobile.preview" />
+  </queries>
   <application android:label="myserver" android:theme="@style/AppTheme" android:icon="@drawable/ic_launcher" android:allowBackup="false" android:usesCleartextTraffic="false" android:supportsRtl="true">
+    <activity android:name="app.thoughts.mobile.shell.updates.UpdateActivity" android:exported="false" android:configChanges="orientation|screenSize" />
+    <provider android:name="app.thoughts.mobile.shell.updates.UpdateFileProvider" android:authorities="app.thoughts.mobile.updates" android:exported="false" android:grantUriPermissions="true" />
+    <receiver android:name="app.thoughts.mobile.shell.updates.UpdateReceiver" android:exported="true">
+      <intent-filter><action android:name="android.intent.action.DOWNLOAD_COMPLETE" /></intent-filter>
+    </receiver>
+    <activity android:name="app.thoughts.mobile.modules.inbox.InboxPreviewActivity" android:exported="false" android:configChanges="orientation|screenSize" />
     <service android:name="app.thoughts.mobile.modules.inbox.TransferService" android:exported="false" android:foregroundServiceType="dataSync" />
     <provider android:name="app.thoughts.mobile.modules.inbox.InboxFileProvider" android:authorities="app.thoughts.mobile.inbox.files" android:exported="false" android:grantUriPermissions="true" />
     <activity android:name="app.thoughts.mobile.modules.inbox.InboxShareActivity" android:label="发送到收件箱" android:exported="true" android:windowSoftInputMode="adjustResize" android:configChanges="orientation|screenSize|keyboardHidden">

@@ -179,6 +179,48 @@ public final class InboxUiChecks {
             .clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
         });
         capture(test, "inbox-share.png");
+        String[] destination = { null };
+        Instrumentation.ActivityMonitor route =
+          new Instrumentation.ActivityMonitor() {
+            @Override
+            public Instrumentation.ActivityResult onStartActivity(
+              Intent intent
+            ) {
+              destination[0] = intent.getStringExtra("open_feature");
+              return new Instrumentation.ActivityResult(
+                Activity.RESULT_CANCELED,
+                null
+              );
+            }
+          };
+        test.addMonitor(route);
+        try {
+          java.lang.reflect.Method configure =
+            InboxShareActivity.class.getDeclaredMethod("configureServer");
+          configure.setAccessible(true);
+          test.runOnMainSync(() -> {
+            try {
+              configure.invoke(reopened);
+            } catch (Exception error) {
+              throw new AssertionError(error);
+            }
+          });
+          TerminalChecks.check(
+            "server".equals(destination[0]),
+            "Share editor configuration must open the server page while retaining its draft"
+          );
+          try (InboxStore store = new InboxStore(context)) {
+            TerminalChecks.check(
+              store
+                .draft(draftId[0])
+                .optString("text")
+                .equals("private relay draft edited"),
+              "Opening server configuration must preserve the shared draft"
+            );
+          }
+        } finally {
+          test.removeMonitor(route);
+        }
       } finally {
         test.runOnMainSync(reopened::finish);
       }
@@ -234,6 +276,14 @@ public final class InboxUiChecks {
             InteractionChecks.find(root, "发布前检查") == null,
           "File filter must use attachment presence"
         );
+        View fileTitle = InteractionChecks.find(root, "本周构建");
+        ((View) fileTitle.getParent()).performLongClick();
+        InteractionChecks.find(root, "全选").performClick();
+        TerminalChecks.check(
+          InteractionChecks.find(root, "已选 1 项") != null,
+          "Select all must include only visible filtered entries"
+        );
+        main.onBackPressed();
         InteractionChecks.find(root, "文字").performClick();
         TerminalChecks.check(
           InteractionChecks.find(root, "本周构建") == null &&

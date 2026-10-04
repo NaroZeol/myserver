@@ -131,6 +131,7 @@ public final class MainActivity extends Activity implements ThoughtsHost {
   protected void onResume() {
     super.onResume();
     foreground = true;
+    app.thoughts.mobile.shell.updates.UpdateManager.automatic(this);
     InboxFiles.resumeInstall(this);
     if (active != null) active.resume();
     try {
@@ -247,6 +248,8 @@ public final class MainActivity extends Activity implements ThoughtsHost {
     }
     if (!features.containsKey(id)) return;
     if (id.equals(current) && !editorRoute) return;
+    message = "";
+    feedbackUntil = 0;
     (
       (android.view.inputmethod.InputMethodManager) getSystemService(
         INPUT_METHOD_SERVICE

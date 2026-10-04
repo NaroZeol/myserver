@@ -41,10 +41,7 @@ public final class InboxFileProvider extends ContentProvider {
   public String getType(Uri uri) {
     try (InboxStore store = new InboxStore(getContext())) {
       JSONObject f = task(store, uri).document.getJSONObject("file");
-      String type = f.optString("mime", "application/octet-stream");
-      return type.matches("[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+")
-        ? type
-        : "application/octet-stream";
+      return InboxMedia.mime(f);
     } catch (Exception e) {
       return "application/octet-stream";
     }

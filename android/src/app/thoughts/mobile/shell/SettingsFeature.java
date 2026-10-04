@@ -35,6 +35,27 @@ public final class SettingsFeature extends Ui implements Feature {
         .versionName;
     } catch (Exception ignored) {}
     setting(about, "myserver", version, null);
+    app.thoughts.mobile.shell.updates.UpdateCatalog.Release update =
+      app.thoughts.mobile.shell.updates.UpdateManager.selected(activity);
+    setting(
+      about,
+      "应用更新",
+      update != null &&
+        update.code >
+          app.thoughts.mobile.shell.updates.UpdateManager.installedCode(
+            activity,
+            update.packageName
+          )
+        ? "发现新版本"
+        : "",
+      () ->
+        activity.startActivity(
+          new android.content.Intent(
+            activity,
+            app.thoughts.mobile.shell.updates.UpdateActivity.class
+          )
+        )
+    );
     setting(about, "开源许可", "", () -> showLicenses());
   }
 

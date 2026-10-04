@@ -12,24 +12,15 @@ rm -rf build/generated build/classes build/dex
 mkdir -p build/generated build/classes build/dex
 bash dependencies.sh
 python3 - <<'PY'
-import os, shutil, hashlib, json
+import hashlib, json
 from pathlib import Path
 terminal = Path('assets/terminal')
 for name, digest in json.loads((terminal / 'vendor.json').read_text())['sha256'].items():
     assert hashlib.sha256((terminal / name).read_bytes()).hexdigest() == digest, 'Terminal asset checksum mismatch: ' + name
-# Drop stale resources when switching deployment configurations.
-shutil.rmtree('build/res', ignore_errors=True)
-shutil.copytree('res', 'build/res')
-manifest = Path('AndroidManifest.xml').read_text()
-if os.environ.get('MYSERVER_PREVIEW') == '1':
-    manifest = manifest.replace('package="app.thoughts.mobile"', 'package="app.thoughts.mobile.preview"').replace('android:label="myserver"', 'android:label="myserver·预览"')
-    manifest = manifest.replace('android:authorities="app.thoughts.mobile.inbox.files"', 'android:authorities="app.thoughts.mobile.preview.inbox.files"')
-    p = Path('build/res/xml/shortcuts.xml')
-    p.write_text(p.read_text().replace('android:targetPackage="app.thoughts.mobile"', 'android:targetPackage="app.thoughts.mobile.preview"'))
-Path('build/AndroidManifest.xml').write_text(manifest)
 PY
+python3 release.py prepare-build
 "$ANDROID_BUILD_TOOLS/aapt2" compile --dir build/res -o build/resources.zip
-"$ANDROID_BUILD_TOOLS/aapt2" link -o build/unsigned.apk -I "$ANDROID_JAR" --manifest build/AndroidManifest.xml -A assets --java build/generated build/resources.zip
+"$ANDROID_BUILD_TOOLS/aapt2" link -o build/unsigned.apk -I "$ANDROID_JAR" --manifest build/AndroidManifest.xml -A build/assets --java build/generated build/resources.zip
 find src build/generated -name '*.java' -print > build/sources.txt
 javac -classpath build/deps/jsch-android.jar -encoding UTF-8 -source 8 -target 8 -bootclasspath "$ANDROID_JAR:$ANDROID_BUILD_TOOLS/core-lambda-stubs.jar" -d build/classes @build/sources.txt
 jar cf build/classes.jar -C build/classes .

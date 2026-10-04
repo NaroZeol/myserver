@@ -86,6 +86,11 @@ public class Ui {
     TextView name = text(label, 15, INK);
     row.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
     TextView value = text(detail + (action == null ? "" : "   ›"), 12, MUTED);
+    value.setMaxWidth(
+      activity.getResources().getDisplayMetrics().widthPixels / 2
+    );
+    value.setMaxLines(2);
+    value.setEllipsize(android.text.TextUtils.TruncateAt.END);
     value.setGravity(Gravity.END);
     row.addView(value);
     if (action != null) {

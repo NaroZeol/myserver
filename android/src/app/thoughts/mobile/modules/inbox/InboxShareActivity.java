@@ -465,7 +465,7 @@ public final class InboxShareActivity extends Activity implements Feature.Host {
 
   private void configureServer() {
     if (!saveNow()) return;
-    launchMain("settings", false);
+    launchMain("server", false);
   }
 
   private void launchMain(String feature, boolean returnToMain) {

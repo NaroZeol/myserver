@@ -70,6 +70,11 @@ public final class SmokeTest extends Instrumentation {
   }
 
   public void onStart() {
+    getTargetContext()
+      .getSharedPreferences("app_updates", 0)
+      .edit()
+      .putBoolean("automatic", false)
+      .commit();
     Bundle result = new Bundle();
     MainActivity activity = null;
     if ("key".equals(arguments.getString("mode"))) {
@@ -212,6 +217,7 @@ public final class SmokeTest extends Instrumentation {
         .clear()
         .commit();
       checkDeviceSignature();
+      app.thoughts.mobile.shell.updates.UpdateChecks.run(this);
       Store store = new Store(getTargetContext());
       store.clear();
       new DeviceAccount(getTargetContext()).clear();
@@ -680,6 +686,7 @@ public final class SmokeTest extends Instrumentation {
       "An authorized shell identity must enroll service access without a second password"
     );
     TransferChecks.run(this, restored);
+    app.thoughts.mobile.modules.inbox.InboxMediaChecks.run(this);
     TerminalChecks.run(this, restored);
   }
 }

@@ -28,6 +28,7 @@ final class InboxPagingChecks {
       cache = store.cachedResponse(original);
     }
     ServerProfile[] current = { original };
+    String[] destination = { null };
     CountDownLatch oldStarted = new CountDownLatch(1),
       releaseOld = new CountDownLatch(1),
       oldReturned = new CountDownLatch(1);
@@ -68,7 +69,9 @@ final class InboxPagingChecks {
         return "inbox";
       }
 
-      public void navigate(String id) {}
+      public void navigate(String id) {
+        destination[0] = id;
+      }
 
       public void redraw() {}
 
@@ -187,6 +190,17 @@ final class InboxPagingChecks {
           "Responses from a previous server must not enter the current view"
         )
       );
+      test.runOnMainSync(() -> {
+        feature[0].pause();
+        current[0] = null;
+        LinearLayout unconfigured = new LinearLayout(main);
+        feature[0].render(unconfigured);
+        InteractionChecks.find(unconfigured, "配置服务器").performClick();
+        TerminalChecks.check(
+          "server".equals(destination[0]),
+          "Inbox configuration must open the server page, not app settings"
+        );
+      });
     } finally {
       releaseOld.countDown();
       releaseIdentity.countDown();

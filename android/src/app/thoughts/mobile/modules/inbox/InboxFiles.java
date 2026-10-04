@@ -36,10 +36,7 @@ public final class InboxFiles {
   }
 
   private static String mime(JSONObject file) {
-    String type = file.optString("mime", "application/octet-stream");
-    return type.matches("[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+")
-      ? type
-      : "application/octet-stream";
+    return InboxMedia.mime(file);
   }
 
   private static Intent withFile(

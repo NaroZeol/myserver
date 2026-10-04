@@ -86,14 +86,6 @@ public final class ServerFeature extends Ui implements Feature {
     space(surface, 12);
     if (profile == null) {
       surface.addView(text("连接你的服务器", 26, INK));
-      space(surface, 16);
-      surface.addView(
-        text(
-          "在手机上查看运行状态、打开终端，使用服务器提供的工具。",
-          14,
-          MUTED
-        )
-      );
       space(surface, 28);
       surface.addView(button("添加服务器", () -> configuration(), true));
       return;
@@ -110,30 +102,12 @@ public final class ServerFeature extends Ui implements Feature {
         true
       )
     );
-    space(surface, 8);
-    surface.addView(
-      text(
-        ShellIdentity.registered(activity, profile)
-          ? "设备密钥已授权 · 免密连接"
-          : "首次登录后可记住设备，后续无需重复输入密码。",
-        12,
-        MUTED
-      )
-    );
     space(surface, 16);
     setting(surface, "连接配置", "修改", () -> configuration());
     if (!account.isVerified()) {
       space(surface, 18);
       surface.addView(
         button(loading ? "正在连接…" : "连接服务", () -> connect(), true)
-      );
-      space(surface, 8);
-      surface.addView(
-        text(
-          "监控和扩展模块需要服务器部署 myserver；终端可独立使用。",
-          12,
-          MUTED
-        )
       );
     }
     issue = text(problem, 13, ALERT);

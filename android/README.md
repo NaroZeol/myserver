@@ -23,7 +23,7 @@ bash android/check-boundaries.sh
 
 安装包：`android/build/myserver.apk`。签名别名由 `MYSERVER_KEY_ALIAS` 注入，默认 `myserver`。当前发布证书为 `CN=myserver`，不包含个人名称、邮箱或服务器信息。构建目录已被 Git 忽略，私钥和密码文件不进入仓库。
 
-GitHub Actions 推荐 secrets `MYSERVER_KEYSTORE_BASE64` 和 `MYSERVER_KEYSTORE_PASSWORD`。自有 keystore 使用其他别名时，设置仓库 Actions variable `MYSERVER_KEY_ALIAS`，无需修改工作流。仅主线构建可以读取正式签名；其他分支、PR 或未配置 secrets 时生成 `.preview` 包，不能覆盖正式版；artifact 名为 `myserver-android-<release|preview>-api<29|35>`。
+GitHub Actions 在 Android 10 / 15 测试全部通过后，使用长期渠道证书重新签署已测试 APK，并发布到 GitHub Releases。`main` 发布正式版，开发分支发布独立的 `.preview` 应用；PR 和测试任务不读取发布密钥。正式与预览分别配置签名 secrets，缺失时停止发布。环境变量、更新来源和发布协议见 [App 更新](../docs/app-updates.md)。
 
 本机参数可参考 [.env.example](.env.example)，复制到 `android/.env` 并填写后，显式加载：
 
