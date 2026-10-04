@@ -197,6 +197,7 @@ final class InboxAvailabilityChecks {
       clickDialog(test, "已下载");
       await(test, surface[0], "Only on this phone");
       capture(test, main, "inbox-downloads-local.png");
+      compactFilters(test, surface[0]);
       int before = requests.get();
       test.runOnMainSync(() -> {
         feature[0].enter();
@@ -353,6 +354,111 @@ final class InboxAvailabilityChecks {
         store.invalidateLists(profile);
         store.invalidateLists(foreign);
       }
+    }
+  }
+
+  /** Measure the real filter buttons at a 320dp viewport with 24dp margins and 1.3x text. */
+  private static void compactFilters(Instrumentation test, View root)
+    throws Exception {
+    android.graphics.Bitmap[] picture = { null };
+    test.runOnMainSync(() -> {
+      Button downloaded = (Button) InteractionChecks.find(root, "已下载");
+      TerminalChecks.check(
+        downloaded != null,
+        "Downloaded filter must be visible before compact measurement"
+      );
+      LinearLayout filters = (LinearLayout) downloaded.getParent();
+      float density = root.getResources().getDisplayMetrics().density;
+      int width = Math.round((320 - 48) * density),
+        target = Math.round(48 * density);
+      int left = filters.getLeft(),
+        top = filters.getTop(),
+        right = filters.getRight(),
+        bottom = filters.getBottom();
+      float[] sizes = new float[filters.getChildCount()];
+      try {
+        for (int i = 0; i < filters.getChildCount(); i++) {
+          Button button = (Button) filters.getChildAt(i);
+          sizes[i] = button.getTextSize();
+          button.setTextSize(
+            android.util.TypedValue.COMPLEX_UNIT_PX,
+            sizes[i] * 1.3f
+          );
+        }
+        filters.measure(
+          View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+          View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        );
+        filters.layout(0, 0, width, filters.getMeasuredHeight());
+        for (int i = 0; i < filters.getChildCount(); i++) {
+          Button button = (Button) filters.getChildAt(i);
+          android.text.Layout text = button.getLayout();
+          TerminalChecks.check(
+            button.getWidth() >= target && button.getHeight() >= target,
+            "Compact filter touch targets must remain at least 48dp: " +
+              button.getText()
+          );
+          TerminalChecks.check(
+            button.getLeft() >= 0 &&
+              button.getRight() <= width &&
+              text != null &&
+              text.getLineCount() > 0,
+            "Compact filter must remain within the content width: " +
+              button.getText()
+          );
+          int last = text.getLineCount() - 1;
+          TerminalChecks.check(
+            text.getLineBottom(last) <=
+              button.getHeight() -
+                button.getCompoundPaddingTop() -
+                button.getCompoundPaddingBottom() &&
+              text.getLineEnd(last) == button.getText().length() &&
+              text.getEllipsisCount(last) == 0,
+            "Every line of compact filter text must remain vertically visible: " +
+              button.getText()
+          );
+        }
+        picture[0] = android.graphics.Bitmap.createBitmap(
+          width,
+          filters.getHeight(),
+          android.graphics.Bitmap.Config.ARGB_8888
+        );
+        android.graphics.Canvas canvas = new android.graphics.Canvas(
+          picture[0]
+        );
+        canvas.drawColor(app.thoughts.mobile.core.Ui.PAPER);
+        filters.draw(canvas);
+      } finally {
+        for (int i = 0; i < filters.getChildCount(); i++) (
+          (Button) filters.getChildAt(i)
+        ).setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sizes[i]);
+        filters.measure(
+          View.MeasureSpec.makeMeasureSpec(
+            right - left,
+            View.MeasureSpec.EXACTLY
+          ),
+          View.MeasureSpec.makeMeasureSpec(
+            bottom - top,
+            View.MeasureSpec.EXACTLY
+          )
+        );
+        filters.layout(left, top, right, bottom);
+        filters.requestLayout();
+      }
+    });
+    File dir = new File(
+      test.getTargetContext().getExternalFilesDir(null),
+      "screenshots"
+    );
+    dir.mkdirs();
+    try (
+      OutputStream out = new FileOutputStream(
+        new File(dir, "inbox-downloaded-filter-compact.png")
+      )
+    ) {
+      picture[0].compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out);
+    } finally {
+      if (picture[0] != null) picture[0].recycle();
     }
   }
 

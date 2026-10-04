@@ -225,6 +225,7 @@ public final class InboxFeature extends Ui implements Feature {
     space(surface, 12);
     surface.addView(search, new LinearLayout.LayoutParams(-1, -2));
     LinearLayout filters = new LinearLayout(activity);
+    filters.setGravity(Gravity.CENTER_VERTICAL);
     String[] ids = { "all", "files", "text" },
       names = { "全部", "文件", "文字" };
     for (int i = 0; i < ids.length; i++) {
@@ -248,7 +249,7 @@ public final class InboxFeature extends Ui implements Feature {
       b.setTag(next);
       b.setSelected(filter.equals(next));
       b.setTextColor(filter.equals(next) ? BLUE : MUTED);
-      filters.addView(b, new LinearLayout.LayoutParams(0, dp(48), 1));
+      filters.addView(b, new LinearLayout.LayoutParams(-2, -2, 1));
     }
     Button moreFilters = button(
       localOnly() ? "已下载" : "筛选",
@@ -266,7 +267,7 @@ public final class InboxFeature extends Ui implements Feature {
         ? BLUE
         : MUTED
     );
-    filters.addView(moreFilters, new LinearLayout.LayoutParams(0, dp(48), 1));
+    filters.addView(moreFilters, new LinearLayout.LayoutParams(-2, -2, 1));
     surface.addView(filters);
     divider(surface);
     drafts = column();
