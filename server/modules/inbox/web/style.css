@@ -376,3 +376,54 @@ dialog label {
     align-items: start;
   }
 }
+
+.selection-tools {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 0 14px;
+  border-bottom: 1px solid var(--line);
+}
+.select-loaded {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+.select-loaded input,
+.item-checkbox {
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  margin: 0;
+  flex: 0 0 17px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.selection-tools button {
+  margin-left: auto;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.item-title {
+  display: flex;
+  align-items: baseline;
+  gap: 11px;
+  min-width: 0;
+  flex: 1;
+}
+.item-title h2 {
+  min-width: 0;
+}
+@media (max-width: 600px) {
+  .selection-tools {
+    gap: 10px;
+  }
+  .selection-tools button {
+    width: 100%;
+    margin: 0;
+  }
+}

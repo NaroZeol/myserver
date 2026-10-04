@@ -1,5 +1,5 @@
 """Explicitly started, temporary loopback management UI; no public listener."""
-from contextlib import suppress
+from contextlib import ExitStack, suppress
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hmac
@@ -12,6 +12,8 @@ import secrets
 import socket
 import threading
 import time
+import unicodedata
+import zipfile
 from urllib.parse import parse_qs, quote, urlsplit
 
 from database import connect
@@ -93,6 +95,35 @@ class InboxServer(ThreadingHTTPServer):
         super().server_close()
 
 
+def zip_component(value):
+    cleaned = ''.join('_' if c in '/\\:<>"|?*' or unicodedata.category(c).startswith('C') else c for c in value)
+    cleaned = cleaned.strip(' .').encode('utf-8')[:120].decode('utf-8', errors='ignore').rstrip(' .')
+    return cleaned or '收件'
+
+
+class ZipStream:
+    """Non-seekable ZIP sink; zipfile keeps only its bounded central directory."""
+    def __init__(self, handler):
+        self.handler = handler
+        self.position = 0
+
+    def tell(self):
+        return self.position
+
+    def seek(self, *_args):
+        raise io.UnsupportedOperation('stream')
+
+    def write(self, value):
+        if not self.handler.server.active():
+            raise TimeoutError('Inbox download expired or maintenance started')
+        self.handler.wfile.write(value)
+        self.position += len(value)
+        return len(value)
+
+    def flush(self):
+        self.handler.wfile.flush()
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     server_version = 'myserver'
@@ -152,7 +183,8 @@ class Handler(BaseHTTPRequestHandler):
         self.started = True
         self.send_response(status)
         self.send_header('Content-Type', mime)
-        self.send_header('Content-Length', str(length))
+        if length is not None:
+            self.send_header('Content-Length', str(length))
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'no-referrer')
@@ -259,6 +291,10 @@ class Handler(BaseHTTPRequestHandler):
                     transfer(connection, self.server.database, header, io.BytesIO(content), io.BytesIO(), replies.append)
                 self.reply(200, replies[-1])
                 return
+            if path == '/api/bundle' and self.command == 'GET':
+                self.set_deadline(self.server.deadline)
+                self.bundle(url.query)
+                return
             if path.startswith('/api/download/') and self.command == 'GET':
                 self.set_deadline(self.server.deadline)
                 self.download(path)
@@ -288,6 +324,51 @@ class Handler(BaseHTTPRequestHandler):
                     self.server.busy -= 1
                     self.server.last_active = time.monotonic()
                 self.busy = False
+
+    def bundle(self, query_string):
+        query = parse_qs(query_string, max_num_fields=2, strict_parsing=True)
+        if set(query) != {'items'} or len(query['items']) != 1:
+            raise RpcError('请选择需要下载的收件')
+        item_ids = query['items'][0].split(',')
+        if not 1 <= len(item_ids) <= 32 or len(set(item_ids)) != len(item_ids):
+            raise RpcError('每次最多下载 32 条不同收件')
+        for item_id in item_ids:
+            ident(item_id)
+        with ExitStack() as handles:
+            entries = []
+            with operation(self.server.database), locked(self.server.database, False) as directory, connect(self.server.database) as connection:
+                groups = [(item_row(connection, item_id, True), files(connection, item_id)) for item_id in item_ids]
+                if sum(len(group_files) for _row, group_files in groups) > 64:
+                    raise RpcError('每次打包最多包含 64 个附件，请减少选择', 413)
+                for number, (row, group_files) in enumerate(groups, 1):
+                    folder = f'{number:02d}-' + zip_component(row['title'])
+                    if row['text']:
+                        entries.append((folder + '/文字.txt', row['text'].encode('utf-8'), None))
+                    if row['note']:
+                        entries.append((folder + '/备注.txt', row['note'].encode('utf-8'), None))
+                    for index, entry in enumerate(group_files, 1):
+                        source = handles.enter_context((directory / 'objects' / row['id'] / entry['id']).open('rb'))
+                        if os.fstat(source.fileno()).st_size != entry['size']:
+                            raise RpcError('有附件不完整，请取消选择后重试', 409)
+                        name = folder + f'/{index:02d}-' + zip_component(entry['name'])
+                        entries.append((name, source, entry['size']))
+            # All descriptors point at immutable inodes; deleting an item or
+            # deploying while a reader downloads does not require holding locks.
+            self.headers_out(200, 'application/zip', None, {'Content-Disposition': 'attachment; filename="myserver-inbox.zip"'})
+            writer = ZipStream(self)
+            with zipfile.ZipFile(writer, mode='w', compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
+                for name, content, size in entries:
+                    if size is None:
+                        archive.writestr(name, content)
+                    else:
+                        with archive.open(name, mode='w', force_zip64=True) as target:
+                            remaining = size
+                            while remaining:
+                                block = content.read(min(65536, remaining))
+                                if not block:
+                                    raise OSError('Unexpected EOF in immutable inbox object')
+                                target.write(block)
+                                remaining -= len(block)
 
     def download(self, path):
         parts = path.split('/')

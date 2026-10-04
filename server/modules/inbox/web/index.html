@@ -66,6 +66,17 @@
               aria-label="搜索收件"
             /><button id="refresh" class="quiet">刷新</button>
           </div>
+          <div class="selection-tools">
+            <label class="select-loaded"
+              ><input id="select-loaded" type="checkbox" />选择已加载</label
+            >
+            <span id="selection-count" class="muted" aria-live="polite"
+              >未选择收件</span
+            >
+            <button id="download-selected" class="quiet" disabled>
+              下载所选 ZIP
+            </button>
+          </div>
           <div id="items"></div>
           <button id="more" class="quiet" hidden>加载更多</button>
         </section>

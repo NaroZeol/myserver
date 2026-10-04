@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdtemp, rm, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, dirname } from "node:path";
@@ -290,10 +290,42 @@ try {
     () =>
       document.querySelector("article.item h2")?.textContent === "本周测试材料",
   );
+  await page.locator("#select-loaded").check();
+  assert.equal(await page.locator(".item-checkbox:checked").count(), 3);
+  assert.equal(
+    await page.locator("#selection-count").textContent(),
+    "已选 3 条收件",
+  );
+  const bundlePromise = page.waitForEvent("download");
+  await page.locator("#download-selected").click();
+  const bundle = await bundlePromise;
+  assert.equal(bundle.suggestedFilename(), "myserver-inbox.zip");
+  execFileSync("python3", [
+    "-c",
+    `
+import sys, zipfile
+from pathlib import PurePosixPath
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    assert archive.testzip() is None
+    names = archive.namelist()
+    assert len(names) == len(set(names)) == 8, names
+    assert all(not PurePosixPath(name).is_absolute() and '..' not in PurePosixPath(name).parts for name in names)
+    content = {name: archive.read(name) for name in names}
+    assert b'private fixture bytes' in content.values()
+    assert b'fresh content' in content.values()
+    assert b'safe text' in content.values()
+    assert b'' in content.values()
+    assert bytes([7]) * (4 * 1024 * 1024 + 127) in content.values()
+    assert any(name.endswith('/备注.txt') and '保留这组文件'.encode() in value for name, value in content.items())
+`,
+    await bundle.path(),
+  ]);
   await page.locator("#search").fill("onerror");
   await page.waitForFunction(
     () => document.querySelectorAll("article.item").length === 1,
   );
+  assert.equal(await page.locator(".item-checkbox:checked").count(), 0);
+  assert.equal(await page.locator("#download-selected").isDisabled(), true);
   await page.locator("#search").fill("nothing-matches-fixture");
   await page.waitForFunction(() =>
     document.querySelector("#items").textContent.includes("没有找到"),
@@ -330,7 +362,7 @@ try {
   );
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser token login, private multi-file upload, cross-refresh resume integrity, download, edit/search/delete, logout and responsive layout",
+    "PASS: browser token login, private multi-file upload, cross-refresh resume integrity, individual and batch ZIP downloads, edit/search/delete, logout and responsive layout",
   );
 } finally {
   if (browser) await browser.close();

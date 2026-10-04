@@ -9,6 +9,7 @@ let csrf = "",
   editId = "";
 let tasks = [],
   refreshVersion = 0;
+let pickedItems = new Set();
 try {
   tasks = JSON.parse(
     sessionStorage.getItem("myserver-inbox-transfers") || "[]",
@@ -80,6 +81,7 @@ function showLogin() {
   $("workspace").hidden = true;
   $("logout").hidden = true;
   csrf = "";
+  pickedItems.clear();
 }
 async function enter(value) {
   csrf = value;
@@ -536,6 +538,8 @@ async function refresh(append = false) {
   );
   if (version !== refreshVersion) return;
   items = append ? items.concat(result.items) : result.items;
+  const loaded = new Set(items.map((item) => item.id));
+  pickedItems = new Set([...pickedItems].filter((id) => loaded.has(id)));
   offset = result.next_offset;
   hasMore = result.has_more;
   $("storage").textContent =
@@ -545,7 +549,54 @@ async function refresh(append = false) {
   $("more").hidden = !hasMore;
   renderItems();
 }
+function selectionEntries(selection = pickedItems) {
+  return items.filter((item) => selection.has(item.id));
+}
+function withinSelectionLimit(selection) {
+  const chosen = selectionEntries(selection);
+  if (
+    chosen.length > 32 ||
+    chosen.reduce((total, item) => total + item.files.length, 0) > 64
+  ) {
+    message("每次最多下载 32 条收件、64 个附件，请减少选择。");
+    return false;
+  }
+  return true;
+}
+function renderSelection() {
+  const chosen = selectionEntries();
+  const count = chosen.length;
+  $("selection-count").textContent = count
+    ? "已选 " + count + " 条收件"
+    : "未选择收件";
+  $("download-selected").disabled = count === 0;
+  $("select-loaded").disabled = items.length === 0;
+  $("select-loaded").checked = items.length > 0 && count === items.length;
+  $("select-loaded").indeterminate = count > 0 && count < items.length;
+}
+$("select-loaded").onchange = () => {
+  const proposed = $("select-loaded").checked
+    ? new Set(items.map((item) => item.id))
+    : new Set();
+  if (withinSelectionLimit(proposed)) pickedItems = proposed;
+  renderItems();
+};
+$("download-selected").onclick = async () => {
+  try {
+    const chosen = selectionEntries();
+    if (!chosen.length || !withinSelectionLimit(pickedItems)) return;
+    await api("/session");
+    const link = document.createElement("a");
+    link.href =
+      "/api/bundle?" +
+      new URLSearchParams({ items: chosen.map((item) => item.id).join(",") });
+    link.click();
+  } catch (error) {
+    message(error.message);
+  }
+};
 function renderItems() {
+  renderSelection();
   $("items").replaceChildren();
   if (!items.length) {
     $("items").append(
@@ -562,7 +613,25 @@ function renderItems() {
   for (const item of items) {
     const card = node("article", undefined, "item"),
       top = node("div", undefined, "item-top");
-    top.append(node("h2", item.title));
+    const heading = node("div", undefined, "item-title");
+    const checkbox = node("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "item-checkbox";
+    checkbox.setAttribute("aria-label", "选择收件：" + item.title);
+    checkbox.checked = pickedItems.has(item.id);
+    checkbox.onchange = () => {
+      if (checkbox.checked) {
+        const proposed = new Set([...pickedItems, item.id]);
+        if (!withinSelectionLimit(proposed)) {
+          checkbox.checked = false;
+          return;
+        }
+        pickedItems = proposed;
+      } else pickedItems.delete(item.id);
+      renderSelection();
+    };
+    heading.append(checkbox, node("h2", item.title));
+    top.append(heading);
     top.append(
       node(
         "span",
@@ -641,6 +710,8 @@ $("refresh").onclick = () => refresh().catch((e) => message(e.message));
 $("more").onclick = () => refresh(true).catch((e) => message(e.message));
 let searchTimer;
 $("search").oninput = () => {
+  pickedItems.clear();
+  renderItems();
   clearTimeout(searchTimer);
   searchTimer = setTimeout(
     () => refresh().catch((e) => message(e.message)),

@@ -185,3 +185,92 @@ def test_authenticated_download_uses_server_lifetime_instead_of_upload_deadline(
     monkeypatch.setattr(web_module.Handler,'headers_out',slow_download)
     status,_,body=request('/api/download/'+data['id']+'/'+data['files'][0]['id'],headers=auth)
     assert status==200 and body==b'download'
+
+
+def test_bundle_streams_selected_files_text_notes_with_unique_safe_names(web,database):
+    import io
+    from pathlib import PurePosixPath
+    import zipfile
+    from test_inbox import call,upload,commit
+    server,request=web;auth=login(server,request)
+    first=manifest(b'first file',b'second file',text='private text')
+    first['title']='../shared\\unsafe:<>title';first['note']='private note'
+    for entry in first['files']:entry['name']='same.txt'
+    second=manifest(text='second private text');second['title']=first['title']
+    for data in (first,second):call(database,'/inbox/uploads','POST',data)
+    upload(database,first,0,b'first file');upload(database,first,1,b'second file')
+    commit(database,first);commit(database,second)
+    path='/api/bundle?'+urlencode(dict(items=first['id']+','+second['id']))
+    assert request(path)[0]==401
+    status,headers,raw=request(path,headers=auth)
+    assert status==200 and headers['Content-Type']=='application/zip'
+    assert headers['Content-Disposition']=='attachment; filename="myserver-inbox.zip"'
+    assert 'Content-Length' not in headers and headers['Connection']=='close'
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        names=archive.namelist()
+        assert len(names)==len(set(names))==5
+        assert all(not PurePosixPath(name).is_absolute() and '..' not in PurePosixPath(name).parts and not any(c in name for c in '\\:<>'+chr(0)) for name in names)
+        assert all(entry.compress_type==zipfile.ZIP_STORED for entry in archive.infolist())
+        assert {archive.read(name) for name in names}=={b'first file',b'second file',b'private text',b'private note',b'second private text'}
+        assert archive.testzip() is None
+
+
+def test_bundle_limits_and_missing_selection_never_start_zip(web,database):
+    import uuid
+    from test_inbox import call,commit
+    server,request=web;auth=login(server,request)
+    one=manifest(text='item');call(database,'/inbox/uploads','POST',one);commit(database,one)
+    for query in ('', 'items=', 'items='+one['id']+','+one['id'], 'items='+','.join(str(uuid.uuid4()) for _ in range(33))):
+        assert request('/api/bundle?'+query,headers=auth)[0]==400
+    assert request('/api/bundle?items='+str(uuid.uuid4()),headers=auth)[0]==404
+    groups=[manifest(*([b'']*22)) for _ in range(3)]
+    for group in groups:call(database,'/inbox/uploads','POST',group);commit(database,group)
+    status,headers,_=request('/api/bundle?items='+','.join(g['id'] for g in groups),headers=auth)
+    assert status==413 and headers['Content-Type'].startswith('application/json')
+
+
+def test_bundle_releases_locks_before_streaming_and_keeps_open_deleted_files(web,database,monkeypatch):
+    import fcntl
+    import io
+    import zipfile
+    import modules.inbox.web as web_module
+    from test_inbox import call,upload,commit
+    server,request=web;auth=login(server,request)
+    data=manifest(b'immutable file');call(database,'/inbox/uploads','POST',data);upload(database,data,0,b'immutable file');commit(database,data)
+    original=web_module.ZipStream.write
+    checked=[]
+    def write(self,value):
+        if not checked:
+            for path in (database.parent/'operations.lock',database.parent/'inbox/storage.lock'):
+                with path.open('a') as lock:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            assert call(database,'/inbox/items/'+data['id'],'DELETE')['status']==200
+            checked.append(True)
+        return original(self,value)
+    monkeypatch.setattr(web_module.ZipStream,'write',write)
+    status,_,raw=request('/api/bundle?items='+data['id'],headers=auth)
+    assert status==200 and checked
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        assert archive.read(archive.namelist()[0])==b'immutable file'
+
+
+def test_interrupted_bundle_closes_every_open_attachment(web,database,monkeypatch):
+    from pathlib import Path
+    import modules.inbox.web as web_module
+    from test_inbox import call,upload,commit
+    server,request=web;auth=login(server,request)
+    data=manifest(b'one',b'two');call(database,'/inbox/uploads','POST',data)
+    upload(database,data,0,b'one');upload(database,data,1,b'two');commit(database,data)
+    opened=[];original_open=Path.open
+    def track_open(path,*args,**kwargs):
+        handle=original_open(path,*args,**kwargs)
+        if path.parent.name==data['id'] and path.parent.parent.name=='objects':opened.append(handle)
+        return handle
+    monkeypatch.setattr(Path,'open',track_open)
+    original_write=web_module.ZipStream.write
+    def interrupt(self,value):
+        (database.parent/'maintenance').touch()
+        return original_write(self,value)
+    monkeypatch.setattr(web_module.ZipStream,'write',interrupt)
+    status,_,_raw=request('/api/bundle?items='+data['id'],headers=auth)
+    assert status==200
+    assert len(opened)==2 and all(handle.closed for handle in opened)
