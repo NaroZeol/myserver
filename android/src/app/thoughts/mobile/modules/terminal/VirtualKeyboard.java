@@ -268,14 +268,14 @@ final class VirtualKeyboard extends LinearLayout {
     if (labels.length == 13 && labels[0].equals("Caps")) return label.equals(
       "Caps"
     )
-      ? 1.5f
+      ? 2f
       : label.equals("↵")
-        ? 2f
+        ? 1.5f
         : 1f;
     if (labels.length == 13 && labels[0].equals("⇧")) return label.equals("⇧")
-      ? 1.5f
+      ? 2.5f
       : label.isEmpty()
-        ? 2f
+        ? 1f
         : 1f;
     if (labels.length == 9 && labels[0].equals("Ctrl")) {
       if (label.equals("Ctrl") || label.equals("Alt")) return 1.5f;
