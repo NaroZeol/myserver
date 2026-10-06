@@ -14,6 +14,7 @@ final class TmuxGestureChecks {
     TerminalSurface surface,
     TerminalSession connection
   ) throws Exception {
+    TmuxResizeChecks.run(test, screen, surface, connection);
     test.runOnMainSync(() -> screen.useKeyboard(true, false));
     TerminalChecks.await(
       () ->
