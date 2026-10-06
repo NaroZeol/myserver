@@ -77,18 +77,60 @@ final class VirtualKeyboardChecks {
         "内置终端键盘"
       );
       View q = InteractionChecks.find(keyboard, "q"),
-        a = InteractionChecks.find(keyboard, "a");
+        a = InteractionChecks.find(keyboard, "a"),
+        one = InteractionChecks.find(keyboard, "1"),
+        zero = InteractionChecks.find(keyboard, "0"),
+        up = InteractionChecks.find(keyboard, "↑"),
+        down = InteractionChecks.find(keyboard, "↓"),
+        escape = InteractionChecks.find(
+          screen.getWindow().getDecorView(),
+          "ESC"
+        );
       int[] qPosition = new int[2],
-        aPosition = new int[2];
+        aPosition = new int[2],
+        onePosition = new int[2],
+        zeroPosition = new int[2],
+        keyboardPosition = new int[2],
+        tabPosition = new int[2],
+        capsPosition = new int[2],
+        upPosition = new int[2],
+        downPosition = new int[2];
       q.getLocationOnScreen(qPosition);
       a.getLocationOnScreen(aPosition);
+      one.getLocationOnScreen(onePosition);
+      zero.getLocationOnScreen(zeroPosition);
+      keyboard.getLocationOnScreen(keyboardPosition);
+      InteractionChecks.find(keyboard, "Tab").getLocationOnScreen(tabPosition);
+      InteractionChecks.find(keyboard, "Caps Lock，已关闭").getLocationOnScreen(
+        capsPosition
+      );
+      up.getLocationOnScreen(upPosition);
+      down.getLocationOnScreen(downPosition);
       TerminalChecks.check(
-        aPosition[0] > qPosition[0],
-        "QWERTY home row must be staggered"
+        onePosition[1] < qPosition[1] &&
+          zeroPosition[0] > onePosition[0] &&
+          aPosition[0] > qPosition[0],
+        "Number row and staggered QWERTY letters must follow a familiar keyboard layout"
+      );
+      TerminalChecks.check(
+        !escape.isShown() &&
+          tabPosition[0] < qPosition[0] &&
+          capsPosition[0] < aPosition[0],
+        "Desktop keys must sit beside their letter rows; extra deck hides in built-in mode"
       );
       TerminalChecks.check(
         InteractionChecks.find(keyboard, "空格").getWidth() >= q.getWidth() * 3,
         "Space must be easy to hit on narrow screens"
+      );
+      TerminalChecks.check(
+        Math.abs(
+          upPosition[0] +
+            up.getWidth() / 2 -
+            downPosition[0] -
+            down.getWidth() / 2
+        ) <=
+          up.getWidth() / 3,
+        "Cursor keys must form an inverted T like a physical keyboard"
       );
     });
     capture(test, "terminal-builtin");
@@ -114,13 +156,17 @@ final class VirtualKeyboardChecks {
         screen.getWindow().getDecorView(),
         "内置终端键盘"
       );
+      View escape = InteractionChecks.find(
+        screen.getWindow().getDecorView(),
+        "ESC"
+      );
       int[] a = new int[2],
         b = new int[2];
       surface.getLocationOnScreen(a);
       keyboard.getLocationOnScreen(b);
       TerminalChecks.check(
-        a[0] + surface.getWidth() <= b[0],
-        "Landscape keyboard must sit beside the terminal"
+        a[0] + surface.getWidth() <= b[0] && !escape.isShown(),
+        "Landscape keyboard must sit beside the terminal without a second key deck"
       );
       TerminalChecks.check(
         surface.getHeight() > 0 &&
@@ -161,6 +207,13 @@ final class VirtualKeyboardChecks {
         ).getVisibility() == View.GONE,
         "System input mode must hide the built-in keyboard"
       );
+      TerminalChecks.check(
+        InteractionChecks.find(
+          screen.getWindow().getDecorView(),
+          "ESC"
+        ).isShown(),
+        "System input mode must keep the Termux-style extra keys"
+      );
       screen.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
     });
   }
@@ -168,6 +221,7 @@ final class VirtualKeyboardChecks {
   private static void checkLayers(TerminalActivity screen) {
     java.util.List<String> text = new java.util.ArrayList<>();
     java.util.List<String> special = new java.util.ArrayList<>();
+    java.util.List<String> modifiers = new java.util.ArrayList<>();
     VirtualKeyboard keyboard = new VirtualKeyboard(
       screen,
       new VirtualKeyboard.Actions() {
@@ -177,6 +231,10 @@ final class VirtualKeyboardChecks {
 
         public void special(String value) {
           special.add(value);
+        }
+
+        public void modifier(String name, boolean lock) {
+          modifiers.add(name + ":" + lock);
         }
       }
     );
@@ -189,11 +247,12 @@ final class VirtualKeyboardChecks {
       "End",
       "PgUp",
       "PgDn",
-      "Shift+Tab",
-      "退格",
-      "回车",
     })
       tap(keyboard, name);
+    tap(keyboard, "Shift，长按锁定大写");
+    keyboard.sendSpecial("TAB");
+    tap(keyboard, "退格");
+    tap(keyboard, "回车");
     TerminalChecks.check(
       special.equals(
         java.util.Arrays.asList(
@@ -215,7 +274,7 @@ final class VirtualKeyboardChecks {
           "END",
           "PGUP",
           "PGDN",
-          "BACKTAB",
+          "SHIFT+TAB",
           "BACKSPACE",
           "ENTER"
         )
@@ -285,6 +344,25 @@ final class VirtualKeyboardChecks {
       "External punctuation must produce shifted characters, never key-name prefixes"
     );
     text.clear();
+    tap(keyboard, "Shift，长按锁定大写");
+    tap(keyboard, "1");
+    tap(keyboard, "2");
+    tap(keyboard, "Shift，长按锁定大写");
+    tap(keyboard, "0");
+    TerminalChecks.check(
+      text.equals(java.util.Arrays.asList("!", "2", ")")),
+      "Physical number row must use standard shifted punctuation"
+    );
+    tap(keyboard, "Ctrl，点击单次启用，长按锁定");
+    InteractionChecks.find(
+      keyboard,
+      "Alt，点击单次启用，长按锁定"
+    ).performLongClick();
+    TerminalChecks.check(
+      modifiers.equals(java.util.Arrays.asList("CTRL:false", "ALT:true")),
+      "Desktop modifiers must use the terminal's real one-shot and lock states"
+    );
+    text.clear();
     special.clear();
     InteractionChecks.find(keyboard, "Shift，长按锁定大写").performLongClick();
     tap(keyboard, "A");
@@ -293,7 +371,7 @@ final class VirtualKeyboardChecks {
     tap(keyboard, "F1");
     tap(keyboard, "Fn");
     tap(keyboard, "A");
-    tap(keyboard, "Shift，长按锁定大写");
+    tap(keyboard, "Caps Lock，已开启");
     tap(keyboard, "a");
     TerminalChecks.check(
       text.equals(java.util.Arrays.asList("A", "A", "A", "a")) &&
@@ -350,6 +428,8 @@ final class VirtualKeyboardChecks {
             );
             backspaces.incrementAndGet();
           }
+
+          public void modifier(String name, boolean lock) {}
         }
       );
       tap(keyboard[0], "Shift，长按锁定大写");

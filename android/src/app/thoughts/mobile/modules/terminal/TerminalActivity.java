@@ -156,6 +156,7 @@ public final class TerminalActivity extends Activity {
 
         public void modifiersChanged(int control, int alt) {
           keys.modifiers(control, alt);
+          virtualKeyboard.modifiers(control, alt);
         }
 
         public void selectionChanged(boolean selected) {
@@ -201,6 +202,13 @@ public final class TerminalActivity extends Activity {
 
         public void special(String value) {
           sendKey("special", value);
+        }
+
+        public void modifier(String name, boolean lock) {
+          if (terminal.loaded) terminal.evaluateJavascript(
+            "TerminalUI.modifier(" + JSONObject.quote(name) + "," + lock + ")",
+            null
+          );
         }
       }
     );
@@ -379,6 +387,11 @@ public final class TerminalActivity extends Activity {
       virtualKeyboard.getVisibility() == View.VISIBLE &&
       getResources().getConfiguration().orientation ==
         android.content.res.Configuration.ORIENTATION_LANDSCAPE;
+    keys.setVisibility(
+      internalKeyboard && virtualKeyboard.getVisibility() == View.VISIBLE
+        ? View.GONE
+        : View.VISIBLE
+    );
     workspace.setOrientation(
       side ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL
     );
@@ -393,7 +406,7 @@ public final class TerminalActivity extends Activity {
             (getResources().getDisplayMetrics().widthPixels * 46) / 100,
             -1
           )
-        : new LinearLayout.LayoutParams(-1, dp(208))
+        : new LinearLayout.LayoutParams(-1, dp(240))
     );
     String mode = internalKeyboard ? "内置键盘" : "系统输入法";
     String description = "切换输入方式，当前：" + mode;
@@ -612,6 +625,7 @@ public final class TerminalActivity extends Activity {
     android.content.res.Configuration configuration
   ) {
     super.onConfigurationChanged(configuration);
+    virtualKeyboard.refreshLayout();
     arrangeKeyboard();
     keys.layoutKeys(
       configuration.orientation ==
