@@ -37,6 +37,26 @@ final class TerminalSurface extends WebView {
   int columns = 80,
     rows = 24;
 
+  @Override
+  protected void onSizeChanged(
+    int width,
+    int height,
+    int oldWidth,
+    int oldHeight
+  ) {
+    super.onSizeChanged(width, height, oldWidth, oldHeight);
+    if (
+      width <= 0 || height <= 0 || (width == oldWidth && height == oldHeight)
+    ) return;
+    // Android can settle WebView bounds after the DOM resize observer runs.
+    // A second fit only emits SSH window-change when the cell grid actually changes.
+    postOnAnimation(() -> {
+      if (
+        !disposed && loaded && getWidth() == width && getHeight() == height
+      ) evaluateJavascript("TerminalUI.fit()", null);
+    });
+  }
+
   void keyboardMode(boolean internal) {
     internalKeyboard = internal;
     if (loaded) evaluateJavascript(

@@ -127,6 +127,7 @@
   window.addEventListener('resize', resize);
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe(document.body);
   window.TerminalUI = {
+    fit: resize,
     write(encoded, id) {
       const binary = atob(encoded);
       const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
