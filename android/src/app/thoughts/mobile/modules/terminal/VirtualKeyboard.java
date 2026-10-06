@@ -144,7 +144,15 @@ final class VirtualKeyboard extends LinearLayout {
       Button key = new Button(getContext());
       key.setText(label.equals("Fn") && function && shifted ? "Fn ⇧" : label);
       key.setAllCaps(false);
-      key.setTextSize(label.length() > 1 ? 11 : 16);
+      key.setTextSize(
+        label.equals("Esc") || label.equals("123") || label.equals("ABC")
+          ? 9
+          : label.length() > 1
+            ? 11
+            : 16
+      );
+      key.setSingleLine(true);
+      key.setGravity(android.view.Gravity.CENTER);
       key.setTypeface(android.graphics.Typeface.MONOSPACE);
       key.setTextColor(0xffe8e6df);
       key.setPadding(0, 0, 0, 0);
