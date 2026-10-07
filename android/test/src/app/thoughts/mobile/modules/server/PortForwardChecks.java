@@ -30,11 +30,16 @@ public final class PortForwardChecks {
       ChannelExec command = (ChannelExec) shell.openChannel("exec");
       try {
         command.setCommand("python3 -c '" + script.replace("'", "'\"'\"'") + "'");
+        java.io.ByteArrayOutputStream errors = new java.io.ByteArrayOutputStream();
+        command.setErrStream(errors);
         InputStream output = command.getInputStream();
         command.connect(10000);
         byte[] buffer = new byte[256];
         while (output.read(buffer) != -1) {}
-        check(command.getExitStatus() == 0, "Could not create legacy key fixture");
+        long deadline = System.nanoTime() + 10_000_000_000L;
+        while (!command.isClosed() && System.nanoTime() < deadline) Thread.sleep(20);
+        check(command.getExitStatus() == 0,
+          "Could not create legacy key fixture: " + errors.toString("UTF-8"));
       } finally {
         command.disconnect();
       }
