@@ -150,6 +150,12 @@ final class TerminalInteractionChecks {
         Integer.parseInt(TerminalChecks.js(test, surface, "extraKeyCalls")),
       "Canceled touch must stop key repeat"
     );
+    // Set the sentinel before selection: Android's clipboard preview can cover
+    // the toolbar briefly and intercept an immediately following injected tap.
+    test.runOnMainSync(() ->
+      ((ClipboardManager) screen.getSystemService(Context.CLIPBOARD_SERVICE))
+        .setPrimaryClip(ClipData.newPlainText("fixture", "before_terminal_copy"))
+    );
     // Render the fixture through the live PTY, behind all earlier key echo. A
     // direct terminal.write races SSH output and can change the selected cells
     // between the selection assertion and the asynchronous copy callback.
@@ -215,12 +221,6 @@ final class TerminalInteractionChecks {
           "复制".contentEquals(copy.getTooltipText()) &&
           screen.hasWindowFocus(),
         "Selection copy icon must preserve its accessible action label"
-      );
-      // A sentinel prevents an old clipboard value from making this action pass.
-      (
-        (ClipboardManager) screen.getSystemService(Context.CLIPBOARD_SERVICE)
-      ).setPrimaryClip(
-        ClipData.newPlainText("fixture", "before_terminal_copy")
       );
       copy.getLocationOnScreen(pos);
       pos[0] += copy.getWidth() / 2;
