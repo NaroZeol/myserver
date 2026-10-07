@@ -214,6 +214,8 @@ final class TerminalInteractionChecks {
       surface,
       "window.copyProbe={reads:[]}; window.copyOriginalSelection=TerminalUI.selection; TerminalUI.selection=function(){const value=copyOriginalSelection();copyProbe.reads.push(value);return value}"
     );
+    java.util.concurrent.atomic.AtomicInteger copyTouches =
+      new java.util.concurrent.atomic.AtomicInteger();
     test.runOnMainSync(() -> {
       View copy = InteractionChecks.find(root, "复制");
       TerminalChecks.check(
@@ -222,6 +224,10 @@ final class TerminalInteractionChecks {
           screen.hasWindowFocus(),
         "Selection copy icon must preserve its accessible action label"
       );
+      copy.setOnTouchListener((view, event) -> {
+        if (event.getAction() == MotionEvent.ACTION_DOWN) copyTouches.incrementAndGet();
+        return false;
+      });
       copy.getLocationOnScreen(pos);
       pos[0] += copy.getWidth() / 2;
       pos[1] += copy.getHeight() / 2;
@@ -249,10 +255,23 @@ final class TerminalInteractionChecks {
         return "copy_me".equals(copied.get());
       }, "Copy callback must publish the selected text to the clipboard");
     } catch (AssertionError failure) {
+      String screenshot = "";
+      try {
+        java.io.File directory = new java.io.File(
+          screen.getExternalFilesDir(null), "screenshots");
+        directory.mkdirs();
+        java.io.File image = new java.io.File(directory, "terminal-copy-failure.png");
+        try (java.io.FileOutputStream output = new java.io.FileOutputStream(image)) {
+          test.getUiAutomation().takeScreenshot().compress(
+            android.graphics.Bitmap.CompressFormat.PNG, 100, output);
+        }
+        screenshot = ", screenshot=" + image.getName();
+      } catch (Exception ignored) {}
       throw new AssertionError(
         failure.getMessage() +
           "; " +
-          copyDiagnostics(test, screen, surface, copied.get()),
+          copyDiagnostics(test, screen, surface, copied.get()) +
+          ", touchDowns=" + copyTouches.get() + screenshot,
         failure
       );
     } finally {
@@ -313,6 +332,8 @@ final class TerminalInteractionChecks {
           surface.hasFocus() +
           ", copyShown=" +
           (copy != null && copy.isShown()) +
+          ", copyBounds=" +
+          (copy == null ? "missing" : bounds(copy)) +
           ", feedback=" +
           JSONObject.quote(message)
       );
@@ -329,6 +350,12 @@ final class TerminalInteractionChecks {
         "({copyReads:copyProbe.reads,selection:copyOriginalSelection(),rows:terminal.rows,cols:terminal.cols,focus:document.hasFocus()})"
       )
     );
+  }
+
+  private static String bounds(View view) {
+    int[] position = new int[2];
+    view.getLocationOnScreen(position);
+    return position[0] + "," + position[1] + "+" + view.getWidth() + "x" + view.getHeight();
   }
 
   private static void chooseMode(
