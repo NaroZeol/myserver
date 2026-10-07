@@ -55,22 +55,19 @@ public final class ShellIdentity {
         .getSharedPreferences("terminal_keys", 0)
         .edit()
         .putBoolean(keyId(profile), true)
-        .putBoolean(keyId(profile) + ":forward", true)
         .commit()
     ) throw new Exception("设备密钥已登记，但本机状态保存失败，请重试连接");
   }
 
-  /** Upgrade a legacy terminal key once, using its existing shell access. */
+  /** Ensure this key's forwarding options on each explicit start, using existing shell access. */
   public static void enableForwarding(Context context, ServerProfile profile)
     throws Exception {
     if (!registered(context, profile)) throw new ConnectionFailure(
       401,
       "请先在终端启用免密连接"
     );
-    if (context.getSharedPreferences("terminal_keys", 0).getBoolean(
-      keyId(profile) + ":forward",
-      false
-    )) return;
+    // Old versions cached shell login as forwarding authorization. Never trust that
+    // flag: authorized_keys can also change independently of the phone's state.
     DeviceKey key = new DeviceKey(keyId(profile));
     Session session = SshConnection.open(profile, null, key);
     try {
@@ -78,10 +75,6 @@ public final class ShellIdentity {
     } finally {
       session.disconnect();
     }
-    if (!context.getSharedPreferences("terminal_keys", 0).edit().putBoolean(
-      keyId(profile) + ":forward",
-      true
-    ).commit()) throw new Exception("端口转发授权已更新，但本机状态保存失败");
   }
 
   public static void register(Session session, DeviceKey key) throws Exception {

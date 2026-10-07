@@ -89,9 +89,13 @@ public final class PortForwardService extends Service {
     Session opened = null;
     try {
       opened = SshConnection.open(profile, null, new DeviceKey(ShellIdentity.keyId(profile)));
+      synchronized (this) {
+        if (token != generation) return;
+        session = opened;
+      }
       opened.setServerAliveInterval(30000);
       opened.setServerAliveCountMax(3);
-      int local = opened.setPortForwardingL("127.0.0.1", 0, target, port);
+      int local = PortForwardTunnel.listen(opened, target, port);
       synchronized (this) {
         if (token != generation) return;
         session = opened;
@@ -109,7 +113,7 @@ public final class PortForwardService extends Service {
       synchronized (this) {
         if (token == generation) {
           state = new State("error", label, port, 0, target,
-            e instanceof com.jcraft.jsch.JSchException
+            e instanceof ConnectionFailure ? e.getMessage() : e instanceof com.jcraft.jsch.JSchException
               ? "无法建立端口转发，请检查 SSH 授权与服务器端口"
               : "无法连接服务器，请检查网络后重试");
           finish(token);

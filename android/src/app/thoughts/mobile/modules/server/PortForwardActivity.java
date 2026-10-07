@@ -229,13 +229,13 @@ public final class PortForwardActivity extends Activity {
     PortForwardService.State state = PortForwardService.snapshot();
     if ("active".equals(state.phase)) {
       statePanel.addView(label("正在转发 · " + state.label, 17, Ui.INK));
-      String address = "127.0.0.1:" + state.localPort;
+      String address = PortForwardTunnel.browserUrl(state.localPort);
       statePanel.addView(label("服务器 " + state.serverPort + "  →  手机 " + state.localPort, 13, Ui.MUTED));
       gap(statePanel, 12);
       LinearLayout actions = row();
       actions.addView(action("浏览器打开", () -> {
         try {
-          startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("http://" + address + "/")));
+          startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(address)));
         } catch (Exception e) {
           feedback.setText("没有可打开网页的应用");
         }
