@@ -2,6 +2,10 @@ package app.thoughts.mobile.modules.server;
 
 import android.app.*;
 import android.content.*;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.*;
 import android.text.InputType;
@@ -50,11 +54,11 @@ public final class PortForwardActivity extends Activity {
     setContentView(scroll);
 
     LinearLayout header = row();
-    header.addView(action("‹", () -> finish()), new LinearLayout.LayoutParams(dp(48), dp(48)));
+    header.addView(Ui.iconButton(this, "back", "返回", this::finish, Ui.INK));
     TextView title = label("端口转发", 22, Ui.INK);
     title.setGravity(Gravity.CENTER_VERTICAL);
     header.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1));
-    header.addView(action("刷新", this::loadListeners));
+    header.addView(Ui.iconButton(this, "sync", "刷新端口列表", this::loadListeners, Ui.INK));
     root.addView(header);
     gap(20);
     statePanel = column();
@@ -70,6 +74,7 @@ public final class PortForwardActivity extends Activity {
     manual.setTextSize(16);
     manual.setTextColor(Ui.INK);
     manual.setPadding(dp(12), 0, dp(12), 0);
+    manual.setBackgroundTintList(ColorStateList.valueOf(Ui.LINE));
     form.addView(manual, new LinearLayout.LayoutParams(0, dp(48), 1));
     form.addView(action("转发", () -> {
       int port;
@@ -282,8 +287,14 @@ public final class PortForwardActivity extends Activity {
     button.setText(value);
     button.setTextSize(13);
     button.setAllCaps(false);
+    button.setTextColor(Ui.INK);
+    button.setStateListAnimator(null);
     button.setMinHeight(dp(48));
     button.setMinimumWidth(dp(48));
+    GradientDrawable surface = new GradientDrawable();
+    surface.setColor(Color.TRANSPARENT);
+    surface.setCornerRadius(dp(8));
+    button.setBackground(new RippleDrawable(ColorStateList.valueOf(0x189b5a43), surface, null));
     button.setOnClickListener(v -> click.run());
     return button;
   }
