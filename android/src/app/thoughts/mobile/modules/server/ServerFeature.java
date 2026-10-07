@@ -105,6 +105,9 @@ public final class ServerFeature extends Ui implements Feature {
         true
       )
     );
+    setting(surface, "端口转发", "", () ->
+      activity.startActivity(new Intent(activity, PortForwardActivity.class))
+    );
     space(surface, 16);
     setting(surface, "连接配置", "修改", () -> configuration());
     if (!account.isVerified()) {

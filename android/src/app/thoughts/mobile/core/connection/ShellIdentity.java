@@ -12,6 +12,14 @@ import java.nio.charset.StandardCharsets;
 /** Shell authority uses an independent per-server key, never the restricted RPC identity. */
 public final class ShellIdentity {
 
+  public static String keyIdUnchecked(ServerProfile profile) {
+    try {
+      return keyId(profile);
+    } catch (Exception e) {
+      throw new IllegalStateException("无法识别服务器密钥", e);
+    }
+  }
+
   public static String keyId(ServerProfile profile) throws Exception {
     byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(
       (
@@ -47,8 +55,33 @@ public final class ShellIdentity {
         .getSharedPreferences("terminal_keys", 0)
         .edit()
         .putBoolean(keyId(profile), true)
+        .putBoolean(keyId(profile) + ":forward", true)
         .commit()
     ) throw new Exception("设备密钥已登记，但本机状态保存失败，请重试连接");
+  }
+
+  /** Upgrade a legacy terminal key once, using its existing shell access. */
+  public static void enableForwarding(Context context, ServerProfile profile)
+    throws Exception {
+    if (!registered(context, profile)) throw new ConnectionFailure(
+      401,
+      "请先在终端启用免密连接"
+    );
+    if (context.getSharedPreferences("terminal_keys", 0).getBoolean(
+      keyId(profile) + ":forward",
+      false
+    )) return;
+    DeviceKey key = new DeviceKey(keyId(profile));
+    Session session = SshConnection.open(profile, null, key);
+    try {
+      register(session, key);
+    } finally {
+      session.disconnect();
+    }
+    if (!context.getSharedPreferences("terminal_keys", 0).edit().putBoolean(
+      keyId(profile) + ":forward",
+      true
+    ).commit()) throw new Exception("端口转发授权已更新，但本机状态保存失败");
   }
 
   public static void register(Session session, DeviceKey key) throws Exception {
@@ -70,14 +103,24 @@ public final class ShellIdentity {
       " if (pathlib.Path.home()/'.local/share/myserver/maintenance').exists(): raise RuntimeError('maintenance')\n" +
       " p=root/'authorized_keys'\n" +
       " old=p.read_text() if p.exists() else ''\n" +
-      " line='no-agent-forwarding,no-port-forwarding,no-X11-forwarding '+parts[0]+' '+parts[1]+' myserver-terminal'\n" +
+      " legacy='no-agent-forwarding,no-port-forwarding,no-X11-forwarding '+parts[0]+' '+parts[1]+' myserver-terminal'\n" +
+      " line='no-agent-forwarding,no-X11-forwarding,permitopen=\"127.0.0.1:*\",permitopen=\"[::1]:*\",permitlisten=\"127.0.0.1:1\",permitlisten=\"[::1]:1\" '+parts[0]+' '+parts[1]+' myserver-terminal'\n" +
       " matches=[existing for existing in old.splitlines() if parts[1] in existing.split()]\n" +
-      " if any(existing.split()[:3]!=line.split()[:3] for existing in matches): raise RuntimeError('key has different authority')\n" +
-      " if not matches:\n" +
-      "  with p.open('a') as out:\n" +
-      "   os.chmod(p,0o600)\n" +
-      "   out.write(('\\n' if old and not old.endswith('\\n') else '')+line+'\\n')\n" +
-      "   out.flush(); os.fsync(out.fileno())\n";
+      " if any(existing not in (legacy,line) for existing in matches): raise RuntimeError('key has different authority')\n" +
+      " if len(matches)>1: raise RuntimeError('duplicate terminal key')\n" +
+      " if not matches or matches[0]==legacy:\n" +
+      "  rows=old.splitlines()\n" +
+      "  if matches: rows=[line if row==legacy else row for row in rows]\n" +
+      "  else: rows.append(line)\n" +
+      "  temp=root/('authorized_keys.'+str(os.getpid())+'.tmp')\n" +
+      "  fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)\n" +
+      "  try:\n" +
+      "   with os.fdopen(fd,'w') as out:\n" +
+      "    out.write('\\n'.join(rows)+'\\n'); out.flush(); os.fsync(out.fileno())\n" +
+      "   os.replace(temp,p)\n" +
+      "   directory=os.open(root,os.O_RDONLY); os.fsync(directory); os.close(directory)\n" +
+      "  finally:\n" +
+      "   if temp.exists(): temp.unlink()\n";
     ChannelExec channel = (ChannelExec) session.openChannel("exec");
     try {
       channel.setCommand("python3 -c '" + script.replace("'", "'\"'\"'") + "'");

@@ -19,6 +19,7 @@ import app.thoughts.mobile.core.connection.SshConnection;
 import app.thoughts.mobile.modules.inbox.InboxUiChecks;
 import app.thoughts.mobile.modules.inbox.TransferChecks;
 import app.thoughts.mobile.modules.server.ServerChecks;
+import app.thoughts.mobile.modules.server.PortForwardChecks;
 import app.thoughts.mobile.modules.terminal.TerminalChecks;
 import app.thoughts.mobile.modules.thoughts.DeviceEnrollment;
 import app.thoughts.mobile.modules.thoughts.SshTransport;
@@ -680,6 +681,12 @@ public final class SmokeTest extends Instrumentation {
       ShellIdentity.registered(getTargetContext(), restored),
       "One authorization must also remember the separate terminal identity"
     );
+    check(
+      new ServerApi(restored).request("/system/listeners", "GET", null)
+        .getJSONArray("items").length() > 0,
+      "Read-only server listener discovery must work over SSH"
+    );
+    PortForwardChecks.run(getTargetContext(), restored);
     check(
       DeviceAccess.authorize(getTargetContext(), restored, null, false)
         .optString("transport")

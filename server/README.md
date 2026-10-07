@@ -86,6 +86,8 @@ journalctl --user -u myserver-publish.service -u myserver-backup.service -n 50
 
 `/system` 需要 `system.read` 权限，返回 CPU 短时使用率、1/5/15 分钟负载、内存、磁盘与运行时间，以及设备获准读取的模块状态。指标来自 Python 标准库与 Linux `/proc`，无采集代理、shell 命令或后台轮询。CPU 为约 200ms 的采样，内存使用量按 `MemTotal - MemAvailable` 计算；无法读取的指标返回空值。参见 [Linux /proc 文档](https://docs.kernel.org/filesystems/proc.html)。
 
+`/system/listeners` 使用同一 `system.read` 权限，按需读取服务器本机可达的 TCP 监听端口，并尽可能从 `/proc/<pid>/comm` 标记程序名；不会读取命令行参数。其他用户的进程名称可能无法读取，App 仍可手动输入端口。
+
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install pytest==8.4.2

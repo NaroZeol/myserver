@@ -26,6 +26,10 @@
     <service android:name="app.thoughts.mobile.modules.terminal.TerminalService" android:exported="false" android:foregroundServiceType="specialUse">
       <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started interactive SSH terminal session with ongoing notification and explicit disconnect action" />
     </service>
+    <service android:name="app.thoughts.mobile.modules.server.PortForwardService" android:exported="false" android:foregroundServiceType="specialUse">
+      <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started SSH local port forwarding to a phone-local listener with explicit stop action" />
+    </service>
+    <activity android:name="app.thoughts.mobile.modules.server.PortForwardActivity" android:exported="false" />
     <activity android:name="app.thoughts.mobile.modules.terminal.TerminalActivity" android:launchMode="singleTop" android:exported="false" android:windowSoftInputMode="adjustResize" android:configChanges="orientation|screenSize|keyboardHidden" />
     <activity android:name="app.thoughts.mobile.MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize" android:configChanges="orientation|screenSize|keyboardHidden">
       <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
