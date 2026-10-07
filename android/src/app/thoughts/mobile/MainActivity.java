@@ -239,6 +239,10 @@ public final class MainActivity extends Activity implements ThoughtsHost {
         status("服务器配置已保存");
         return;
       }
+      app.thoughts.mobile.modules.server.PortForwardService.State forward =
+        app.thoughts.mobile.modules.server.PortForwardService.snapshot();
+      if ("active".equals(forward.phase) || "connecting".equals(forward.phase))
+        app.thoughts.mobile.modules.server.PortForwardService.stop(this);
       account.clear();
       api = new ServerApi(profile);
       getSharedPreferences("server_status", 0).edit().clear().commit();

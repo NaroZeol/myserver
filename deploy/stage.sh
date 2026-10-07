@@ -7,7 +7,7 @@ server_target="${1:-${MYSERVER_SSH_TARGET:-}}"
 # Upload a complete bundle without changing the active application.
 tar -C "$repo_dir" --exclude=__pycache__ --exclude=tests --exclude=README.md -cf - \
     server/cli.py server/backups.py server/database.py server/rpc.py server/service.py server/paths.py \
-    server/ssh_gateway.py server/system_metrics.py server/modules \
+    server/ssh_gateway.py server/system_metrics.py server/listeners.py server/modules \
     deploy/activate.sh deploy/activate.py deploy/install-user.sh deploy/backup.sh deploy/myserver \
     deploy/myserver-backup.service deploy/myserver-backup.timer \
     deploy/myserver-publish.service deploy/myserver-publish.timer \

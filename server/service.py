@@ -9,6 +9,7 @@ from database import connect
 import modules
 from rpc import Reply, Request, Route, RpcError
 from system_metrics import snapshot
+from listeners import snapshot as listening_ports
 
 VERSION = '1.12.0'
 
@@ -31,6 +32,10 @@ def system_status(connection, request):
     ))
 
 
+def system_listeners(connection, request):
+    return Reply(dict(items=listening_ports()))
+
+
 def prepare(value, capabilities, database):
     if not isinstance(value, dict):
         raise ValueError('请求必须是 JSON 对象')
@@ -43,7 +48,8 @@ def prepare(value, capabilities, database):
     if body is not None and not isinstance(body, dict):
         raise ValueError('请求内容必须是 JSON 对象')
     granted = frozenset(capabilities) & modules.capabilities()
-    routes = [Route(None, 'GET', r'/session', session), Route('system.read', 'GET', r'/system', system_status)] + modules.routes()
+    routes = [Route(None, 'GET', r'/session', session), Route('system.read', 'GET', r'/system', system_status),
+              Route('system.read', 'GET', r'/system/listeners', system_listeners)] + modules.routes()
     for route in routes:
         match = re.fullmatch(route.pattern, url.path)
         if route.method == method and match:
