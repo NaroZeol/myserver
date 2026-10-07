@@ -52,8 +52,8 @@ public final class PortForwardChecks {
         socket.connect(new InetSocketAddress("127.0.0.1", local), 5000);
         socket.setSoTimeout(5000);
         byte[] banner = new byte[4];
-        int count = socket.getInputStream().read(banner);
-        check(count == 4 && new String(banner, "US-ASCII").equals("SSH-"),
+        new java.io.DataInputStream(socket.getInputStream()).readFully(banner);
+        check(new String(banner, "US-ASCII").equals("SSH-"),
           "Forwarded socket did not reach the fixture SSH daemon");
       }
       tunnel.delPortForwardingL("127.0.0.1", local);
