@@ -55,6 +55,67 @@ def test_web_token_host_origin_csrf_and_no_public_content(web):
     assert request('/api/inbox', headers=auth)[0] == 401
 
 
+@pytest.mark.parametrize('hostname', ['127.0.0.1', 'localhost', '[::1]'])
+def test_web_forwarded_port_keeps_login_and_csrf_checks(web, hostname):
+    server, request = web
+    # SSH carries HTTP unchanged: Host/Origin contain the phone's allocated port,
+    # not the port InboxServer is listening on.
+    port = 49152 if server.server_address[1] != 49152 else 49153
+    host = f'{hostname}:{port}'
+    forwarded = {'Host': host, 'Origin': 'http://' + host}
+    status, _, raw = request('/', headers=forwarded)
+    assert status == 200, raw.decode()
+    assert request('/api/inbox', headers=forwarded)[0] == 401
+    assert request('/api/login', 'POST', dict(token='wrong'), forwarded)[0] == 401
+    status, headers, raw = request('/api/login', 'POST', dict(token=server.token), forwarded)
+    assert status == 200
+    auth = dict(forwarded, Cookie=headers['Set-Cookie'].split(';', 1)[0])
+    assert request('/api/inbox', headers=auth)[0] == 200
+    assert request('/api/inbox/uploads', 'POST', manifest(text='forwarded'), auth)[0] == 403
+    auth['X-CSRF-Token'] = json.loads(raw)['csrf']
+    assert request('/api/inbox/uploads', 'POST', manifest(text='forwarded'), auth)[0] == 200
+    for origin in (f'http://{hostname}:{server.server_address[1]}', 'http://attacker.test', 'null', ''):
+        assert request('/api/inbox', headers=dict(auth, Origin=origin))[0] == 403
+        assert request('/api/logout', 'POST', {}, dict(auth, Origin=origin))[0] == 403
+    assert request('/api/logout', 'POST', {}, auth)[0] == 200
+    assert request('/api/inbox', headers=auth)[0] == 401
+
+
+@pytest.mark.parametrize('host', [
+    'attacker.test:49152', '127.0.0.1.attacker.test:49152', 'localhost.attacker.test:49152',
+    '127.0.0.1@attacker.test:49152', 'attacker.test@127.0.0.1:49152',
+    '192.168.1.1:49152', '0.0.0.0:49152', '[::]:49152', '[::ffff:127.0.0.1]:49152',
+    '127.0.0.1:0', 'localhost:65536', 'localhost:-1', 'localhost:abc',
+    '127.0.0.1:49152/path', '127.0.0.1:49152?query', '127.0.0.1:49152#fragment',
+    '127.0.0.1:49152,localhost:49152', 'http://127.0.0.1:49152',
+])
+def test_web_forwarding_rejects_non_loopback_or_malformed_authority(web, host):
+    server, request = web
+    headers = {'Host': host, 'Origin': 'http://' + host,
+               'X-Forwarded-Host': f'127.0.0.1:{server.server_address[1]}'}
+    assert request('/', headers=headers)[0] == 403
+    assert request('/api/login', 'POST', dict(token=server.token), headers)[0] == 403
+
+
+@pytest.mark.parametrize('duplicate', ['Host', 'Origin'])
+def test_web_rejects_duplicate_authority_headers(web, duplicate):
+    server, _ = web
+    port = server.server_address[1]
+    connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+    try:
+        connection.putrequest('GET', '/', skip_host=True)
+        values = {'Host': f'127.0.0.1:{port}', 'Origin': f'http://127.0.0.1:{port}'}
+        for name, value in values.items():
+            connection.putheader(name, value)
+        connection.putheader(duplicate, values[duplicate])
+        connection.endheaders()
+        response = connection.getresponse()
+        assert response.status == 403
+        response.read()
+    finally:
+        connection.close()
+
+
 def test_web_upload_download_is_attachment_and_stream_hash_checked(web):
     server, request = web; auth=login(server,request)
     content=b'<script>location="https://attacker.test/"</script>'

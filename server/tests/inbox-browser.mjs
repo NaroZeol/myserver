@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtemp, rm, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createServer, createConnection } from "node:net";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,6 +37,8 @@ server.serve_forever()
   },
 );
 let browser;
+let forwarder;
+const forwardedSockets = new Set();
 const screenshots =
   process.env.INBOX_SCREENSHOTS || resolve(directory, "screenshots");
 await mkdir(screenshots, { recursive: true });
@@ -49,6 +52,27 @@ try {
     child.once("exit", (code) => reject(new Error("Fixture exited " + code)));
     child.stderr.on("data", (chunk) => process.stderr.write(chunk));
   });
+  // Like SSH -L, forward raw bytes without rewriting HTTP Host or Origin.
+  // All browser flows must work when the phone's port differs from the server's.
+  const upstreamUrl = new URL(ready.url);
+  forwarder = createServer((client) => {
+    const upstream = createConnection({ host: "127.0.0.1", port: Number(upstreamUrl.port) });
+    for (const socket of [client, upstream]) {
+      forwardedSockets.add(socket);
+      socket.on("error", () => { client.destroy(); upstream.destroy(); });
+      socket.on("close", () => {
+        forwardedSockets.delete(socket);
+        client.destroy(); upstream.destroy();
+      });
+    }
+    client.pipe(upstream).pipe(client);
+  });
+  await new Promise((resolve, reject) => {
+    forwarder.once("error", reject);
+    forwarder.listen(0, "127.0.0.1", resolve);
+  });
+  assert.notEqual(forwarder.address().port, Number(upstreamUrl.port));
+  ready.url = "http://127.0.0.1:" + forwarder.address().port;
   browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
   const page = await browser.newPage({
     viewport: { width: 1280, height: 900 },
@@ -624,10 +648,12 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
   );
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser token login, multi-file upload and resume integrity, bounded private preview cache and request deduplication, image/text previews, type/source/sort filters, ZIP downloads, edit/search/batch delete, logout and responsive layout",
+    "PASS: browser access through a different forwarded port, token login, multi-file upload and resume integrity, bounded private preview cache and request deduplication, image/text previews, type/source/sort filters, ZIP downloads, edit/search/batch delete, logout and responsive layout",
   );
 } finally {
   if (browser) await browser.close();
+  for (const socket of forwardedSockets) socket.destroy();
+  if (forwarder?.listening) await new Promise((resolve) => forwarder.close(resolve));
   child.kill("SIGTERM");
   await new Promise((resolve) =>
     child.exitCode !== null ? resolve() : child.once("exit", resolve),

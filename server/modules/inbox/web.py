@@ -330,18 +330,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_method(self):
         try:
-            port = self.server.server_address[1]
-            allowed = (f'127.0.0.1:{port}', f'localhost:{port}')
             host = self.headers.get('Host', '')
             if len(self.path) > 2048 or sum(len(k) + len(v) for k, v in self.headers.items()) > 16384:
                 raise RpcError('请求头过大', 431)
-            if len(self.headers.get_all('Host', [])) != 1 or host not in allowed:
+            # SSH -L preserves the browser's Host/Origin, including its local port.
+            # Validate an exact loopback authority, not the server's listening port.
+            authority = re.fullmatch(r'(?:127\.0\.0\.1|localhost|\[::1\])(?::([1-9][0-9]{0,4}))?', host)
+            if len(self.headers.get_all('Host', [])) != 1 or authority is None or int(authority.group(1) or 80) > 65535:
                 raise RpcError('仅支持本机访问；请使用 SSH 端口转发', 403)
             if not self.server.active():
                 raise RpcError('本次管理入口已结束', 503)
             mutation = self.command != 'GET'
             origin = self.headers.get('Origin')
-            if (mutation and origin != 'http://' + host) or (origin and origin != 'http://' + host):
+            if len(self.headers.get_all('Origin', [])) > 1 or ((mutation or origin is not None) and origin != 'http://' + host):
                 raise RpcError('跨来源请求被拒绝', 403)
             url = urlsplit(self.path)
             if url.scheme or url.netloc or url.fragment or '%' in url.path:
